@@ -1,0 +1,19 @@
+# Sanal ortam ve önbellekler
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Derleme çıktıları (dist, GitHub Releases'a yüklenir; repoya girmez)
+build/
+dist/
+*.spec
+
+# Yerel araç ayarları
+.claude/
+
+# Yerel kimlik ve sertifika dosyaları: asla paylaşılmamalı
+*.p12
+*.pfx
+*.pem
+*.key

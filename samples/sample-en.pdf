@@ -1,0 +1,128 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 1338 >>
+stream
+BT /F2 18 Tf 72 770 Td (SERVICE AGREEMENT \(TEST DOCUMENT\)) Tj ET
+1.5 w 72 758 m 523 758 l S
+BT /F1 11 Tf 72 725 Td (This document was prepared to try out a PDF editor and signing application.) Tj ET
+BT /F1 11 Tf 72 707 Td (It is a sample agreement and has no legal force.) Tj ET
+BT /F1 11 Tf 72 689 Td () Tj ET
+BT /F2 11 Tf 72 671 Td (Clause 1 - Parties) Tj ET
+BT /F1 11 Tf 72 653 Td (The first party \(Provider\) and the second party \(Customer\) have agreed) Tj ET
+BT /F1 11 Tf 72 635 Td (on the following terms.) Tj ET
+BT /F1 11 Tf 72 617 Td () Tj ET
+BT /F2 11 Tf 72 599 Td (Clause 2 - Scope) Tj ET
+BT /F1 11 Tf 72 581 Td (The Provider supplies monthly reporting and consulting services to the Customer.) Tj ET
+BT /F1 11 Tf 72 563 Td () Tj ET
+BT /F2 11 Tf 72 545 Td (Clause 3 - Term) Tj ET
+BT /F1 11 Tf 72 527 Td (This agreement is valid for 12 months from the date of signature.) Tj ET
+BT /F1 11 Tf 72 509 Td () Tj ET
+BT /F2 11 Tf 72 491 Td (Clause 4 - Fee) Tj ET
+BT /F1 11 Tf 72 473 Td (The monthly fee is 500 USD and is paid in the first week of each month.) Tj ET
+BT /F2 11 Tf 72 330 Td (Full name:) Tj ET
+1 w 150 328 m 340 328 l S
+BT /F2 11 Tf 72 290 Td (Date:) Tj ET
+1 w 150 288 m 260 288 l S
+BT /F2 11 Tf 72 200 Td (Signature:) Tj ET
+1 w 150 150 220 70 re S
+BT /F1 8 Tf 155 135 Td (\(place your signature in this box\)) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 673 >>
+stream
+BT /F2 18 Tf 72 770 Td (APPLICATION FORM) Tj ET
+1.5 w 72 758 m 523 758 l S
+BT /F2 11 Tf 72 710 Td (First name:) Tj ET
+1 w 220 702 300 26 re S
+BT /F2 11 Tf 72 660 Td (Last name:) Tj ET
+1 w 220 652 300 26 re S
+BT /F2 11 Tf 72 610 Td (ID / Passport no:) Tj ET
+1 w 220 602 300 26 re S
+BT /F2 11 Tf 72 560 Td (Phone:) Tj ET
+1 w 220 552 300 26 re S
+BT /F2 11 Tf 72 510 Td (Email:) Tj ET
+1 w 220 502 300 26 re S
+BT /F2 11 Tf 72 460 Td (Address:) Tj ET
+1 w 220 452 300 26 re S
+BT /F2 11 Tf 72 410 Td (Note:) Tj ET
+1 w 220 402 300 26 re S
+BT /F1 11 Tf 72 350 Td ([ ] I have read and accept the terms.) Tj ET
+BT /F1 11 Tf 72 320 Td ([ ] I would like to receive update emails.) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 1185 >>
+stream
+BT /F2 18 Tf 72 770 Td (MONTHLY REPORT SUMMARY) Tj ET
+1.5 w 72 758 m 523 758 l S
+1 w 72 720 m 523 720 l S
+BT /F2 11 Tf 78 701 Td (Item) Tj ET
+BT /F2 11 Tf 238 701 Td (January) Tj ET
+BT /F2 11 Tf 338 701 Td (February) Tj ET
+BT /F2 11 Tf 438 701 Td (March) Tj ET
+1 w 72 692 m 523 692 l S
+BT /F1 11 Tf 78 673 Td (Income) Tj ET
+BT /F1 11 Tf 238 673 Td (12.000) Tj ET
+BT /F1 11 Tf 338 673 Td (13.500) Tj ET
+BT /F1 11 Tf 438 673 Td (15.250) Tj ET
+1 w 72 664 m 523 664 l S
+BT /F1 11 Tf 78 645 Td (Expenses) Tj ET
+BT /F1 11 Tf 238 645 Td (8.200) Tj ET
+BT /F1 11 Tf 338 645 Td (8.900) Tj ET
+BT /F1 11 Tf 438 645 Td (9.100) Tj ET
+1 w 72 636 m 523 636 l S
+BT /F1 11 Tf 78 617 Td (Net) Tj ET
+BT /F1 11 Tf 238 617 Td (3.800) Tj ET
+BT /F1 11 Tf 338 617 Td (4.600) Tj ET
+BT /F1 11 Tf 438 617 Td (6.150) Tj ET
+1 w 72 608 m 523 608 l S
+1 w 72 720 m 72 608 l S
+1 w 232 720 m 232 608 l S
+1 w 332 720 m 332 608 l S
+1 w 432 720 m 432 608 l S
+1 w 523 720 m 523 608 l S
+BT /F1 11 Tf 72 560 Td (This page is designed so that you can easily tell which page is which) Tj ET
+BT /F1 11 Tf 72 542 Td (when testing page reordering, rotating, deleting and merging.) Tj ET
+BT /F1 11 Tf 72 524 Td (Page 3 of 3.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000128 00000 n 
+0000000225 00000 n 
+0000000327 00000 n 
+0000001716 00000 n 
+0000001852 00000 n 
+0000002575 00000 n 
+0000002711 00000 n 
+0000003947 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+4084
+%%EOF

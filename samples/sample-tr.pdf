@@ -1,0 +1,128 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 1330 >>
+stream
+BT /F2 18 Tf 72 770 Td (HIZMET SOZLESMESI \(TEST BELGESI\)) Tj ET
+1.5 w 72 758 m 523 758 l S
+BT /F1 11 Tf 72 725 Td (Bu belge, PDF duzenleyici ve imzalayici uygulamasini denemek icin hazirlanmis) Tj ET
+BT /F1 11 Tf 72 707 Td (ornek bir sozlesmedir. Icerigi gercek bir hukuki baglayiciliga sahip degildir.) Tj ET
+BT /F1 11 Tf 72 689 Td () Tj ET
+BT /F2 11 Tf 72 671 Td (Madde 1 - Taraflar) Tj ET
+BT /F1 11 Tf 72 653 Td (Birinci taraf \(Hizmet Veren\) ile ikinci taraf \(Musteri\) asagidaki sartlarda) Tj ET
+BT /F1 11 Tf 72 635 Td (anlasmistir.) Tj ET
+BT /F1 11 Tf 72 617 Td () Tj ET
+BT /F2 11 Tf 72 599 Td (Madde 2 - Kapsam) Tj ET
+BT /F1 11 Tf 72 581 Td (Hizmet Veren, Musteri icin aylik raporlama ve danismanlik hizmeti sunar.) Tj ET
+BT /F1 11 Tf 72 563 Td () Tj ET
+BT /F2 11 Tf 72 545 Td (Madde 3 - Sure) Tj ET
+BT /F1 11 Tf 72 527 Td (Sozlesme imza tarihinden itibaren 12 ay gecerlidir.) Tj ET
+BT /F1 11 Tf 72 509 Td () Tj ET
+BT /F2 11 Tf 72 491 Td (Madde 4 - Bedel) Tj ET
+BT /F1 11 Tf 72 473 Td (Aylik hizmet bedeli 5.000 TL'dir ve her ayin ilk haftasinda odenir.) Tj ET
+BT /F2 11 Tf 72 330 Td (Ad Soyad:) Tj ET
+1 w 150 328 m 340 328 l S
+BT /F2 11 Tf 72 290 Td (Tarih:) Tj ET
+1 w 150 288 m 260 288 l S
+BT /F2 11 Tf 72 200 Td (Imza:) Tj ET
+1 w 150 150 220 70 re S
+BT /F1 8 Tf 155 135 Td (\(imzanizi bu kutuya yerlestirin\)) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 667 >>
+stream
+BT /F2 18 Tf 72 770 Td (BASVURU FORMU) Tj ET
+1.5 w 72 758 m 523 758 l S
+BT /F2 11 Tf 72 710 Td (Ad:) Tj ET
+1 w 220 702 300 26 re S
+BT /F2 11 Tf 72 660 Td (Soyad:) Tj ET
+1 w 220 652 300 26 re S
+BT /F2 11 Tf 72 610 Td (T.C. / Pasaport No:) Tj ET
+1 w 220 602 300 26 re S
+BT /F2 11 Tf 72 560 Td (Telefon:) Tj ET
+1 w 220 552 300 26 re S
+BT /F2 11 Tf 72 510 Td (E-posta:) Tj ET
+1 w 220 502 300 26 re S
+BT /F2 11 Tf 72 460 Td (Adres:) Tj ET
+1 w 220 452 300 26 re S
+BT /F2 11 Tf 72 410 Td (Not:) Tj ET
+1 w 220 402 300 26 re S
+BT /F1 11 Tf 72 350 Td ([ ] Kosullari okudum ve kabul ediyorum.) Tj ET
+BT /F1 11 Tf 72 320 Td ([ ] Bilgilendirme e-postalari almak istiyorum.) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 1189 >>
+stream
+BT /F2 18 Tf 72 770 Td (AYLIK RAPOR OZETI) Tj ET
+1.5 w 72 758 m 523 758 l S
+1 w 72 720 m 523 720 l S
+BT /F2 11 Tf 78 701 Td (Kalem) Tj ET
+BT /F2 11 Tf 238 701 Td (Ocak) Tj ET
+BT /F2 11 Tf 338 701 Td (Subat) Tj ET
+BT /F2 11 Tf 438 701 Td (Mart) Tj ET
+1 w 72 692 m 523 692 l S
+BT /F1 11 Tf 78 673 Td (Gelir) Tj ET
+BT /F1 11 Tf 238 673 Td (12.000) Tj ET
+BT /F1 11 Tf 338 673 Td (13.500) Tj ET
+BT /F1 11 Tf 438 673 Td (15.250) Tj ET
+1 w 72 664 m 523 664 l S
+BT /F1 11 Tf 78 645 Td (Gider) Tj ET
+BT /F1 11 Tf 238 645 Td (8.200) Tj ET
+BT /F1 11 Tf 338 645 Td (8.900) Tj ET
+BT /F1 11 Tf 438 645 Td (9.100) Tj ET
+1 w 72 636 m 523 636 l S
+BT /F1 11 Tf 78 617 Td (Net) Tj ET
+BT /F1 11 Tf 238 617 Td (3.800) Tj ET
+BT /F1 11 Tf 338 617 Td (4.600) Tj ET
+BT /F1 11 Tf 438 617 Td (6.150) Tj ET
+1 w 72 608 m 523 608 l S
+1 w 72 720 m 72 608 l S
+1 w 232 720 m 232 608 l S
+1 w 332 720 m 332 608 l S
+1 w 432 720 m 432 608 l S
+1 w 523 720 m 523 608 l S
+BT /F1 11 Tf 72 560 Td (Bu sayfa, sayfa siralama, dondurme, silme ve birlestirme islemlerini) Tj ET
+BT /F1 11 Tf 72 542 Td (denerken hangi sayfanin hangisi oldugunu kolayca ayirt etmek icin) Tj ET
+BT /F1 11 Tf 72 524 Td (tasarlanmistir. Sayfa 3 / 3.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000128 00000 n 
+0000000225 00000 n 
+0000000327 00000 n 
+0000001708 00000 n 
+0000001844 00000 n 
+0000002561 00000 n 
+0000002697 00000 n 
+0000003937 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+4074
+%%EOF
