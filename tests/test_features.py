@@ -47,6 +47,39 @@ def test_added_text_extracts_punctuation_as_typed():
         doc.undo()
 
 
+# ---- page order ----------------------------------------------------------------
+
+def _numbered(n=5) -> PdfDocument:
+    src = pymupdf.open()
+    for i in range(n):
+        src.new_page(width=300, height=300).insert_text((40, 40), f"Sayfa {i + 1}")
+    src.set_toc([[1, "Dört", 4]])
+    src[3].add_rect_annot(pymupdf.Rect(10, 10, 50, 50))
+    return PdfDocument(src.tobytes())
+
+
+def _order(doc):
+    return [int(doc._doc[i].get_text().split()[1]) for i in range(doc.page_count)]
+
+
+@pytest.mark.parametrize("pnos, to, expected, new", [
+    ([3], 0, [4, 1, 2, 3, 5], [0]),
+    ([0], 5, [2, 3, 4, 5, 1], [4]),
+    ([1, 3], 0, [2, 4, 1, 3, 5], [0, 1]),  # non-adjacent pages keep their order
+    ([0, 1], 4, [3, 4, 1, 2, 5], [2, 3]),
+    ([2], 2, [1, 2, 3, 4, 5], [2]),  # dropped on itself: nothing changes
+    ([2], 3, [1, 2, 3, 4, 5], [2]),
+])
+def test_move_pages(pnos, to, expected, new):
+    doc = _numbered()
+    assert doc.move_pages(pnos, to) == new
+    assert _order(doc) == expected
+    assert doc.can_undo() == (expected != [1, 2, 3, 4, 5])
+    four = expected.index(4)
+    assert doc.bookmarks()[0].page == four  # the bookmark follows its page
+    assert len(list(doc._doc[four].annots())) == 1  # and so does the annotation
+
+
 # ---- redaction ---------------------------------------------------------------
 
 @pytest.mark.parametrize("rotation", [0, 90])

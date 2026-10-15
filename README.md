@@ -11,13 +11,13 @@ time from **Help › Language**. The app restarts to apply the change.
 
 | Area | What you can do |
 |---|---|
-| Viewing | Zoom (Ctrl+wheel), fit to width, page thumbnails, bookmarks (add, rename, delete), printing, drag-and-drop to open |
+| Viewing | Zoom (Ctrl+wheel or the status bar), fit to width, page thumbnails, bookmarks (add, rename, delete), printing, drag-and-drop to open, recent files (File menu and start screen) |
 | Search | Find text (Ctrl+F) with Turkish-aware case matching (`ikinci` finds `İKİNCİ`) |
 | Text | Add text and edit lines or whole paragraphs directly on the page: font, size, bold, italic and color per word; left, centered, right or justified; line spacing and box width. Alignment and mixed styles of existing paragraphs are kept. Full Unicode support, including Turkish characters |
 | Markup | Highlight, freehand pen, rectangle, ellipse, line, arrow (fill, dashed lines, opacity), sticky notes (icon and color), stamps (any text), insert images, erase annotations |
 | Select | Click a shape, stamp, note, image, form field or paragraph to move it (drag or arrow keys), resize it with its handles, change its color, fill, line or opacity, edit it (double-click) or delete it |
 | Redaction | Mark areas (or every search match) and permanently remove the text, images and drawings under them |
-| Pages | Rotate, delete, reorder, crop, insert pages from another PDF, save selected pages as a separate PDF |
+| Pages | Rotate, delete, reorder (drag thumbnails, several at once), crop, insert pages from another PDF, save selected pages as a separate PDF |
 | Page content | Text watermark (angle, opacity, in front or behind), header and footer with page number, page count and date |
 | Forms | Create text, multi-line, checkbox, drop-down and list fields; fill in text fields, checkboxes, radio buttons and drop-downs |
 | Export | Pages as PNG/JPEG images; a compressed copy with smaller images and subset fonts |

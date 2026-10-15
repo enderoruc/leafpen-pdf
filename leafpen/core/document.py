@@ -472,10 +472,23 @@ class PdfDocument:
         """Move page `src` so that it ends up at index `dst`."""
         if src == dst or not (0 <= dst < self.page_count):
             return
-        with self._edit():
-            # MuPDF's move_page inserts *before* the target index (-1 = append).
-            to = dst if dst < src else dst + 1
-            self._doc.move_page(src, -1 if to >= self.page_count else to)
+        self.move_pages([src], dst if dst < src else dst + 1)
+
+    def move_pages(self, pnos: list[int], to: int) -> list[int]:
+        """Move pages so they end up, in their current order, before the page now at index `to`
+        (`to == page_count` appends). Returns their new indexes. Bookmarks, links, annotations
+        and form fields move with their pages."""
+        n = self.page_count
+        moving = sorted(set(p for p in pnos if 0 <= p < n))
+        if not moving:
+            return []
+        rest = [p for p in range(n) if p not in moving]
+        at = sum(1 for p in rest if p < to)
+        order = rest[:at] + moving + rest[at:]
+        if order != list(range(n)):
+            with self._edit():
+                self._doc.select(order)
+        return list(range(at, at + len(moving)))
 
     def insert_pdf(self, path: str, at: int) -> int:
         """Insert all pages of another PDF before index `at`. Returns pages added."""

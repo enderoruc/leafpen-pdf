@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import math
 import os
 import sys
@@ -31,6 +32,30 @@ def _pdf_filter() -> str:
 
 def _megabytes(n: int) -> str:
     return f"{n / 1_048_576:.2f} MB"
+
+
+# Which properties-bar settings each drawing tool uses.
+_ALL_PROPS = {"color", "fill", "width", "dashed", "opacity"}
+_TOOL_PROPS = {
+    Tool.PEN: {"color", "width", "opacity"},
+    Tool.RECT: _ALL_PROPS,
+    Tool.ELLIPSE: _ALL_PROPS,
+    Tool.LINE: {"color", "width", "dashed", "opacity"},
+    Tool.ARROW: {"color", "width", "dashed", "opacity"},
+}
+
+
+def _object_props(obj) -> set[str]:
+    """Which properties-bar settings apply to a selected object."""
+    if obj.kind == "text":
+        return {"color"}
+    if obj.kind != "annot":
+        return set()
+    if obj.subtype in ("Square", "Circle"):
+        return _ALL_PROPS
+    if obj.subtype in ("Line", "Ink", "Polygon", "PolyLine"):
+        return {"color", "width", "dashed", "opacity"}
+    return {"color", "opacity"}
 
 
 def _object_label(obj) -> str:
@@ -143,9 +168,12 @@ class MainWindow(QMainWindow):
         bar_lay.addWidget(verify_btn)
         self.sig_bar.hide()
 
-        self.empty = QLabel(tr("Press Ctrl+O to open a PDF or drag a file here."))
+        # Start screen: how to open a file, and the recently opened ones as links.
+        self.empty = QLabel()
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty.setStyleSheet("color: gray; font-size: 15px;")
+        self.empty.setTextFormat(Qt.TextFormat.RichText)
+        self.empty.setStyleSheet("font-size: 14px;")
+        self.empty.linkActivated.connect(lambda href: self._open_recent(self._recent_files()[int(href)]))
 
         self.find_bar = FindBar()
         self.find_bar.searchRequested.connect(self._search)
@@ -172,9 +200,8 @@ class MainWindow(QMainWindow):
         self._build_menus_and_toolbars()
 
         self.page_label = QLabel()
-        self.zoom_label = QLabel()
         self.statusBar().addPermanentWidget(self.page_label)
-        self.statusBar().addPermanentWidget(self.zoom_label)
+        self.statusBar().addPermanentWidget(self._build_zoom_controls())
 
         self.setAcceptDrops(True)
         self.resize(1200, 860)
@@ -189,6 +216,7 @@ class MainWindow(QMainWindow):
     def _build_pages_dock(self):
         self.thumbs = ThumbnailList()
         self.thumbs.pageActivated.connect(self.view.go_to)
+        self.thumbs.pagesDropped.connect(self._move_pages)
         buttons = QHBoxLayout()
         buttons.setSpacing(2)
         self._page_buttons = []
@@ -343,7 +371,10 @@ class MainWindow(QMainWindow):
         T = self.tool_actions
         mb = self.menuBar()
         m = mb.addMenu(tr("&File"))
-        m.addActions([self.act_open, self.act_save, self.act_save_as])
+        m.addAction(self.act_open)
+        self.recent_menu = m.addMenu(tr("Open &recent"))
+        self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
+        m.addActions([self.act_save, self.act_save_as])
         m.addSeparator()
         m.addActions([self.act_insert, self.act_extract])
         m.addSeparator()
@@ -394,28 +425,25 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
-        tb = QToolBar(tr("File"))
-        tb.setObjectName("fileToolbar")
-        tb.setMovable(False)
-        tb.addActions([self.act_open, self.act_save])
-        tb.addSeparator()
-        tb.addActions([self.act_undo, self.act_redo])
-        tb.addSeparator()
-        tb.addActions([self.act_zoom_out, self.act_fit, self.act_zoom_in])
-        self.addToolBar(tb)
-        self.addToolBarBreak()  # the tools no longer fit next to the file toolbar
-
+        # One row: file and history icons, then the tools. Zoom lives in the status bar, and the
+        # properties bar below only appears for the tools that use it.
         tools = QToolBar(tr("Tools"))
         tools.setObjectName("toolsToolbar")
         tools.setMovable(False)
         tools.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        for a in (self.act_open, self.act_save, None, self.act_undo, self.act_redo, None):
+            if a is None:
+                tools.addSeparator()
+            else:
+                tools.addAction(a)
+                tools.widgetForAction(a).setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         tools.addActions([T[Tool.BROWSE], T[Tool.SELECT], T[Tool.ADD_TEXT]])
         tools.addWidget(self._tool_menu_button(tr("Edit text"), [Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH]))
         tools.addActions([T[Tool.HIGHLIGHT], T[Tool.PEN]])
         tools.addWidget(self._tool_menu_button(tr("Shapes"), [Tool.RECT, Tool.ELLIPSE, Tool.LINE, Tool.ARROW]))
-        tools.addActions([T[t] for t in (Tool.NOTE, Tool.STAMP, Tool.IMAGE, Tool.SIGNATURE, Tool.REDACT,
-                                         Tool.ERASE)])
-        tools.addSeparator()
+        tools.addActions([T[Tool.NOTE], T[Tool.STAMP]])
+        tools.addWidget(self._tool_menu_button(tr("Insert"), [Tool.IMAGE, Tool.SIGNATURE]))
+        tools.addActions([T[Tool.REDACT], T[Tool.ERASE]])
         tools.addSeparator()
         sign_btn = QToolButton()
         sign_btn.setDefaultAction(self.act_digital)
@@ -424,7 +452,40 @@ class MainWindow(QMainWindow):
         tools.addWidget(sign_btn)
         self.addToolBar(tools)
         self.addToolBarBreak()
-        self.addToolBar(self._build_properties_bar())
+        self.props_bar = self._build_properties_bar()
+        self.addToolBar(self.props_bar)
+
+    def _build_zoom_controls(self) -> QWidget:
+        """− [zoom ▾] + in the status bar."""
+        host = QWidget()
+        lay = QHBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        out_btn = QToolButton()
+        out_btn.setText("−")
+        out_btn.setToolTip(tr("Zoom out") + f" ({self.act_zoom_out.shortcut().toString()})")
+        out_btn.setAutoRaise(True)
+        out_btn.clicked.connect(self.act_zoom_out.trigger)
+        self.zoom_btn = QToolButton()
+        self.zoom_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.zoom_btn.setAutoRaise(True)
+        self.zoom_btn.setToolTip(tr("Zoom"))
+        menu = QMenu(self.zoom_btn)
+        menu.addAction(self.act_fit)
+        menu.addAction(self.act_actual)
+        menu.addSeparator()
+        for percent in (50, 75, 100, 125, 150, 200, 300, 400):
+            menu.addAction(tr("{percent}%", percent=percent), lambda p=percent: self.view.set_zoom(p / 100))
+        self.zoom_btn.setMenu(menu)
+        in_btn = QToolButton()
+        in_btn.setText("+")
+        in_btn.setToolTip(tr("Zoom in") + f" ({self.act_zoom_in.shortcut().toString()})")
+        in_btn.setAutoRaise(True)
+        in_btn.clicked.connect(self.act_zoom_in.trigger)
+        for w in (out_btn, self.zoom_btn, in_btn):
+            lay.addWidget(w)
+        self._zoom_buttons = [out_btn, self.zoom_btn, in_btn]
+        return host
 
     def _build_properties_bar(self) -> QToolBar:
         """Color, fill, line width/style and opacity: defaults for new items, or the selected item's style."""
@@ -434,12 +495,15 @@ class MainWindow(QMainWindow):
         self.props_label = QLabel()
         self.props_label.setStyleSheet("color: palette(placeholder-text); padding: 0 6px;")
         bar.addWidget(self.props_label)
-        bar.addWidget(QLabel(tr(" Color ")))
+        labels = {name: QLabel(text) for name, text in (
+            ("color", tr(" Color ")), ("fill", tr(" Fill ")), ("width", tr(" Width ")), ("dashed", tr(" Line ")),
+            ("opacity", tr(" Opacity ")))}
+        bar.addWidget(labels["color"])
         self.color_btn = dialogs.ColorButton(self.view.pen_color)
         self.color_btn.clicked.disconnect()
         self.color_btn.clicked.connect(self._pick_color)
         bar.addWidget(self.color_btn)
-        bar.addWidget(QLabel(tr(" Fill ")))
+        bar.addWidget(labels["fill"])
         self.fill_btn = QToolButton()
         self.fill_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.fill_btn.setToolTip(tr("Fill color of rectangles and ellipses"))
@@ -448,25 +512,29 @@ class MainWindow(QMainWindow):
         menu.addAction(tr("Choose fill color…"), self._pick_fill)
         self.fill_btn.setMenu(menu)
         bar.addWidget(self.fill_btn)
-        bar.addWidget(QLabel(tr(" Width ")))
+        bar.addWidget(labels["width"])
         self.width_spin = QSpinBox()
         self.width_spin.setRange(1, 12)
         self.width_spin.setValue(round(self.view.pen_width))
         self.width_spin.valueChanged.connect(self._set_pen_width)
         bar.addWidget(self.width_spin)
-        bar.addWidget(QLabel(tr(" Line ")))
+        bar.addWidget(labels["dashed"])
         self.dash_combo = QComboBox()
         self.dash_combo.addItem(tr("Solid"), False)
         self.dash_combo.addItem(tr("Dashed"), True)
         self.dash_combo.activated.connect(lambda _i: self._set_dashed(self.dash_combo.currentData()))
         bar.addWidget(self.dash_combo)
-        bar.addWidget(QLabel(tr(" Opacity ")))
+        bar.addWidget(labels["opacity"])
         self.opacity_spin = QSpinBox()
         self.opacity_spin.setRange(10, 100)
         self.opacity_spin.setSingleStep(10)
         self.opacity_spin.setSuffix(" %")
         self.opacity_spin.valueChanged.connect(lambda v: self._set_opacity(v / 100))
         bar.addWidget(self.opacity_spin)
+        self._prop_widgets = {
+            "color": [labels["color"], self.color_btn], "fill": [labels["fill"], self.fill_btn],
+            "width": [labels["width"], self.width_spin], "dashed": [labels["dashed"], self.dash_combo],
+            "opacity": [labels["opacity"], self.opacity_spin]}
         self._show_defaults()
         return bar
 
@@ -482,6 +550,8 @@ class MainWindow(QMainWindow):
         self.act_redo.setEnabled(has_doc and self.doc.can_redo())
         self.view.setVisible(has_doc)
         self.empty.setVisible(not has_doc)
+        if not has_doc:
+            self._update_empty()
         if has_doc:
             name = os.path.basename(self.doc.path) if self.doc.path else tr("Untitled")
             self.setWindowTitle(f"{name}{' •' if self.doc.dirty else ''} — {APP_NAME}")
@@ -490,13 +560,14 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _update_status(self):
+        for w in self._zoom_buttons:
+            w.setVisible(self.doc is not None)
         if self.doc:
             self.page_label.setText(tr("Page {page} / {total}", page=self.view.current_page() + 1,
                                        total=self.doc.page_count))
-            self.zoom_label.setText(tr("{percent}%", percent=round(self.view.zoom * 100)))
+            self.zoom_btn.setText(tr("{percent}%", percent=round(self.view.zoom * 100)) + " ")
         else:
             self.page_label.clear()
-            self.zoom_label.clear()
 
     def _on_page_changed(self, pno: int):
         self.thumbs.show_current(pno)
@@ -539,6 +610,7 @@ class MainWindow(QMainWindow):
             checked = self.tool_group.checkedAction()
             if checked:
                 checked.setChecked(False)
+        self._update_props_bar()
         self.statusBar().showMessage(_tool_hint(tool))
 
     # ---- properties bar ----------------------------------------------------------
@@ -583,14 +655,33 @@ class MainWindow(QMainWindow):
         self._show_style(self.view.pen_color, self._default_fill(), self.view.pen_width, self._default_dashed(),
                          self._default_opacity())
 
-    def _on_selection(self, obj):
-        if obj is None:
+    def _enable_props(self, fields: set[str]):
+        for name, widgets in self._prop_widgets.items():
+            for w in widgets:
+                w.setEnabled(name in fields)
+
+    def _update_props_bar(self):
+        """Show the properties bar only for tools that use it, with only the settings that apply."""
+        tool = self.view.tool
+        obj = self.view.selection
+        if tool in _TOOL_PROPS:
             self._show_defaults()
+            self._enable_props(_TOOL_PROPS[tool])
+        elif tool == Tool.SELECT and obj is not None:
+            self.props_label.setText(tr("Selected {kind}:", kind=_object_label(obj)))
+            color = QColor.fromRgbF(*obj.stroke) if obj.stroke else self.view.pen_color
+            fill = QColor.fromRgbF(*obj.fill) if obj.fill else None
+            self._show_style(color, fill, obj.width or self.view.pen_width, obj.dashed, obj.opacity)
+            self._enable_props(_object_props(obj))
+        elif tool == Tool.SELECT:
+            self.props_label.setText(tr("Nothing selected"))
+            self._enable_props(set())
+        self.props_bar.setVisible(tool in _TOOL_PROPS or tool == Tool.SELECT)
+
+    def _on_selection(self, obj):
+        self._update_props_bar()
+        if obj is None:
             return
-        self.props_label.setText(tr("Selected {kind}:", kind=_object_label(obj)))
-        color = QColor.fromRgbF(*obj.stroke) if obj.stroke else self.view.pen_color
-        fill = QColor.fromRgbF(*obj.fill) if obj.fill else None
-        self._show_style(color, fill, obj.width or self.view.pen_width, obj.dashed, obj.opacity)
         if obj.movable:
             hint = tr("Drag to move, drag the handles to resize. Delete removes it; double-click edits it.")
         else:
@@ -693,6 +784,63 @@ class MainWindow(QMainWindow):
             return self.save()
         return r == QMessageBox.StandardButton.Discard
 
+    # ---- recent files ----------------------------------------------------------------
+
+    MAX_RECENT = 10
+
+    def _recent_files(self) -> list[str]:
+        value = self.settings.value("recent_files", [])
+        if isinstance(value, str):  # QSettings returns a lone entry as a plain string
+            value = [value]
+        return [str(v) for v in (value or []) if v]
+
+    def _set_recent_files(self, paths: list[str]):
+        self.settings.setValue("recent_files", paths[: self.MAX_RECENT])
+        if self.doc is None:
+            self._update_empty()
+
+    def _add_recent(self, path: str):
+        path = os.path.abspath(path)
+        key = os.path.normcase(path)
+        self._set_recent_files([path] + [p for p in self._recent_files() if os.path.normcase(p) != key])
+
+    def _fill_recent_menu(self):
+        self.recent_menu.clear()
+        paths = self._recent_files()
+        for i, path in enumerate(paths):
+            number = f"&{i + 1}" if i < 9 else str(i + 1)  # Alt+1..9 shortcuts
+            a = self.recent_menu.addAction(f"{number}  {os.path.basename(path).replace('&', '&&')}")
+            a.setToolTip(path)
+            a.setStatusTip(path)
+            a.triggered.connect(lambda _c=False, p=path: self._open_recent(p))
+        if not paths:
+            self.recent_menu.addAction(tr("No recent files")).setEnabled(False)
+        else:
+            self.recent_menu.addSeparator()
+            self.recent_menu.addAction(tr("Clear list"), lambda: self._set_recent_files([]))
+        self.recent_menu.setToolTipsVisible(True)
+
+    def _open_recent(self, path: str):
+        if not os.path.exists(path):
+            dialogs.warn(self, tr("The file no longer exists:\n{path}\n\nIt was removed from the list.", path=path))
+            self._set_recent_files([p for p in self._recent_files() if p != path])
+            return
+        if self._confirm_discard():
+            self.open_path(path)
+
+    def _update_empty(self):
+        """The start screen: how to open a file and the recent files as links."""
+        parts = [f"<p style='color: gray; font-size: 15px'>"
+                 f"{html.escape(tr('Press Ctrl+O to open a PDF or drag a file here.'))}</p>"]
+        paths = self._recent_files()
+        if paths:
+            parts.append(f"<p style='margin-top: 24px'><b>{html.escape(tr('Recent files'))}</b></p>")
+            for i, path in enumerate(paths):
+                folder = os.path.dirname(path)
+                parts.append(f"<p style='margin: 4px'><a href='{i}'>{html.escape(os.path.basename(path))}</a>"
+                             f"<br><span style='color: gray; font-size: 11px'>{html.escape(folder)}</span></p>")
+        self.empty.setText("".join(parts))
+
     def open_dialog(self):
         if not self._confirm_discard():
             return
@@ -726,6 +874,7 @@ class MainWindow(QMainWindow):
             self.doc.close()
         self.doc = doc
         self.settings.setValue("last_dir", os.path.dirname(doc.path))
+        self._add_recent(doc.path)
         self._text_cache.clear()
         self._clear_search()
         self.find_bar.hide()
@@ -803,6 +952,7 @@ class MainWindow(QMainWindow):
             dialogs.warn(self, tr("Could not save: {error}", error=e))
             return False
         self.settings.setValue("last_dir", os.path.dirname(path))
+        self._add_recent(path)
         self.statusBar().showMessage(tr("Saved: {path}", path=path), 4000)
         self._update_signature_bar()
         self._refresh_ui()
@@ -885,14 +1035,22 @@ class MainWindow(QMainWindow):
             self._run(lambda: self.doc.rotate_pages(pages, degrees))
 
     def _move(self, step: int):
+        """Move the selected pages one place up (-1) or down (+1)."""
         if not self.doc:
             return
-        src = self._target_pages()[0]
-        dst = src + step
-        if 0 <= dst < self.doc.page_count and self._run(lambda: self.doc.move_page(src, dst)):
+        pages = self._target_pages()
+        to = min(pages) - 1 if step < 0 else max(pages) + 2
+        if 0 <= to <= self.doc.page_count:
+            self._move_pages(pages, to)
+
+    def _move_pages(self, pages: list[int], to: int):
+        moved: list[int] = []
+        if self._run(lambda: moved.extend(self.doc.move_pages(pages, to))) and moved:
             self.thumbs.clearSelection()
-            self.thumbs.item(dst).setSelected(True)
-            self.view.go_to(dst)
+            for pno in moved:
+                self.thumbs.item(pno).setSelected(True)
+            self.thumbs.scrollToItem(self.thumbs.item(moved[0]))
+            self.view.go_to(moved[0])
 
     def _delete_pages(self):
         if not self.doc:

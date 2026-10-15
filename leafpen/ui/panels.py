@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QFormLayout, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
                                QScrollArea, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -14,6 +14,7 @@ THUMB_WIDTH = 120
 
 class ThumbnailList(QListWidget):
     pageActivated = Signal(int)
+    pagesDropped = Signal(list, int)  # pages being moved, index to insert them before
 
     def __init__(self):
         super().__init__()
@@ -28,10 +29,83 @@ class ThumbnailList(QListWidget):
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setFixedWidth(THUMB_WIDTH + 52)
         self.itemClicked.connect(lambda item: self.pageActivated.emit(self.row(item)))
+        # Drag pages to reorder them. The list itself is not changed by the drop: the
+        # document is, and the list is rebuilt from it.
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(False)  # drawn by paintEvent: Qt's indicator does not suit icon mode
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self._drop_row: int | None = None
         self._queue: list[int] = []
         self._timer = QTimer(self)
         self._timer.setInterval(0)
         self._timer.timeout.connect(self._render_some)
+
+    # ---- reordering by drag and drop -------------------------------------------------
+
+    def _row_for(self, pos) -> int:
+        """Index to insert before for a drop at `pos` (viewport coordinates)."""
+        for row in range(self.count()):
+            r = self.visualItemRect(self.item(row))
+            if pos.y() < r.center().y():
+                return row
+        return self.count()
+
+    def dragEnterEvent(self, e):
+        if e.source() is self:
+            e.setDropAction(Qt.DropAction.MoveAction)
+            e.accept()
+        else:
+            e.ignore()  # files from Explorer: the main window opens them
+
+    def dragMoveEvent(self, e):
+        if e.source() is not self:
+            e.ignore()
+            return
+        row = self._row_for(e.position().toPoint())
+        if row != self._drop_row:
+            self._drop_row = row
+            self.viewport().update()
+        e.setDropAction(Qt.DropAction.MoveAction)
+        e.accept()
+        # scroll when dragging near the top or bottom edge
+        y, h, bar = e.position().y(), self.viewport().height(), self.verticalScrollBar()
+        if y < 30:
+            bar.setValue(bar.value() - 12)
+        elif y > h - 30:
+            bar.setValue(bar.value() + 12)
+
+    def dragLeaveEvent(self, e):
+        self._drop_row = None
+        self.viewport().update()
+        super().dragLeaveEvent(e)
+
+    def dropEvent(self, e):
+        row = self._row_for(e.position().toPoint())
+        self._drop_row = None
+        self.viewport().update()
+        if e.source() is not self:
+            e.ignore()
+            return
+        # Report a copy so Qt does not remove the dragged items itself.
+        e.setDropAction(Qt.DropAction.CopyAction)
+        e.accept()
+        pages = self.selected_pages()
+        if pages:
+            self.pagesDropped.emit(pages, row)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self._drop_row is None or not self.count():
+            return
+        if self._drop_row < self.count():
+            y = self.visualItemRect(self.item(self._drop_row)).top() - self.spacing() // 2
+        else:
+            y = self.visualItemRect(self.item(self.count() - 1)).bottom() + self.spacing() // 2
+        p = QPainter(self.viewport())
+        p.setPen(QPen(QColor(37, 99, 235), 3))
+        p.drawLine(8, y, self.viewport().width() - 8, y)
+        p.end()
 
     def set_document(self, doc):
         self.doc = doc

@@ -75,7 +75,7 @@ class NoteDialog(QDialog):
         self.color = ColorButton(color or QColor(255, 217, 51))
         if new:
             labels = {"Note": tr("Note"), "Comment": tr("Comment"), "Help": tr("Help"), "Key": tr("Key"),
-                      "Insert": tr("Insert"), "Paragraph": tr("Paragraph"), "NewParagraph": tr("New paragraph")}
+                      "Insert": tr("Insertion mark"), "Paragraph": tr("Paragraph"), "NewParagraph": tr("New paragraph")}
             for key in NOTE_ICONS:
                 self.icon.addItem(labels[key], key)
             self.icon.setCurrentIndex(max(0, self.icon.findData(icon)))

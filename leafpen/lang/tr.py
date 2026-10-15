@@ -118,7 +118,6 @@ MESSAGES = {
     "&Help": "&Yardım",
     "&Language": "&Dil",
     "System default": "Sistem dili",
-    "File": "Dosya",
     "Tools": "Araçlar",
     " Color ": " Renk ",
     " Width ": " Kalınlık ",
@@ -484,7 +483,18 @@ MESSAGES = {
     "Comment": "Yorum",
     "Help": "Yardım",
     "Key": "Anahtar",
-    "Insert": "Ekleme",
+    "Insertion mark": "Ekleme işareti",
     "Paragraph": "Paragraf",
     "New paragraph": "Yeni paragraf",
+
+    # --- toolbar, zoom, recent files ---
+    "Insert": "Ekle",
+    "Zoom": "Yakınlaştırma",
+    "Nothing selected": "Seçili öğe yok",
+    "Open &recent": "&Son açılanlar",
+    "No recent files": "Son açılan dosya yok",
+    "Clear list": "Listeyi temizle",
+    "Recent files": "Son açılanlar",
+    "The file no longer exists:\n{path}\n\nIt was removed from the list.":
+        "Dosya artık yok:\n{path}\n\nListeden kaldırıldı.",
 }
