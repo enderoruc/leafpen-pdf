@@ -13,6 +13,8 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
+from .richedit import InlineTextEditor
+
 
 class Tool(Enum):
     BROWSE = auto()
@@ -34,6 +36,7 @@ class Tool(Enum):
     REDACT = auto()
     CROP = auto()
     FORM_FIELD = auto()
+    SELECT = auto()
 
 
 RECT_TOOLS = {Tool.HIGHLIGHT, Tool.IMAGE, Tool.SIGNATURE, Tool.DIGITAL_SIGN, Tool.RECT, Tool.ELLIPSE,
@@ -49,7 +52,18 @@ _CURSORS = {
     Tool.EDIT_PARAGRAPH: Qt.CursorShape.IBeamCursor,
     Tool.ERASE: Qt.CursorShape.PointingHandCursor,
     Tool.NOTE: Qt.CursorShape.PointingHandCursor,
+    Tool.SELECT: Qt.CursorShape.ArrowCursor,
 }
+
+# Resize handles: name -> (x factor, y factor) along the selection rect.
+_HANDLES = {"tl": (0, 0), "t": (0.5, 0), "tr": (1, 0), "r": (1, 0.5), "br": (1, 1), "b": (0.5, 1), "bl": (0, 1),
+            "l": (0, 0.5)}
+_HANDLE_CURSORS = {"tl": Qt.CursorShape.SizeFDiagCursor, "br": Qt.CursorShape.SizeFDiagCursor,
+                   "tr": Qt.CursorShape.SizeBDiagCursor, "bl": Qt.CursorShape.SizeBDiagCursor,
+                   "t": Qt.CursorShape.SizeVerCursor, "b": Qt.CursorShape.SizeVerCursor,
+                   "l": Qt.CursorShape.SizeHorCursor, "r": Qt.CursorShape.SizeHorCursor,
+                   "p0": Qt.CursorShape.CrossCursor, "p1": Qt.CursorShape.CrossCursor}
+_HANDLE_PX = 7
 
 ACCENT = QColor(37, 99, 235)
 REDACT = QColor(220, 38, 38)
@@ -68,6 +82,11 @@ class PageWidget(QWidget):
         self._stroke: list[QPointF] | None = None
         self._hover: pymupdf.Rect | None = None
         self._pan_origin: QPoint | None = None
+        # select tool: what is being dragged ("move", a handle name, "p0"/"p1"), from where, and the preview
+        self._sel_mode: str | None = None
+        self._sel_origin: QPointF | None = None
+        self._sel_rect: pymupdf.Rect | None = None
+        self._sel_line: tuple[pymupdf.Point, pymupdf.Point] | None = None
 
     def _pt(self, pos: QPointF) -> tuple[float, float]:
         z = self.view.zoom
@@ -75,7 +94,120 @@ class PageWidget(QWidget):
 
     def clear_overlay(self):
         self._drag_start = self._drag_now = self._stroke = self._hover = None
+        self._sel_mode = self._sel_origin = self._sel_rect = self._sel_line = None
         self.update()
+
+    # ---- select tool ---------------------------------------------------------------
+
+    def _selection(self):
+        sel = self.view.selection
+        return sel if sel is not None and sel.page == self.pno else None
+
+    def _handle_points(self, rect: pymupdf.Rect, sel) -> dict[str, QPointF]:
+        z = self.view.zoom
+        if sel.line is not None:
+            line = self._sel_line or sel.line
+            return {"p0": QPointF(line[0].x * z, line[0].y * z), "p1": QPointF(line[1].x * z, line[1].y * z)}
+        if not sel.resizable:
+            return {}
+        return {name: QPointF((rect.x0 + fx * rect.width) * z, (rect.y0 + fy * rect.height) * z)
+                for name, (fx, fy) in _HANDLES.items()}
+
+    def _handle_at(self, pos: QPointF, sel) -> str | None:
+        for name, hp in self._handle_points(sel.rect, sel).items():
+            if abs(hp.x() - pos.x()) <= _HANDLE_PX and abs(hp.y() - pos.y()) <= _HANDLE_PX:
+                return name
+        return None
+
+    def _select_press(self, pos: QPointF):
+        x, y = self._pt(pos)
+        sel = self._selection()
+        mode = None
+        if sel is not None:
+            mode = self._handle_at(pos, sel)
+            if mode is None and sel.movable and pymupdf.Point(x, y) in sel.rect + (-3, -3, 3, 3):
+                mode = "move"
+        if mode is None:
+            sel = self.view.select_provider(self.pno, x, y) if self.view.select_provider else None
+            self.view.set_selection(sel)
+            mode = "move" if sel is not None and sel.movable else None
+        if mode is not None:
+            self._sel_mode, self._sel_origin = mode, pos
+            self._sel_rect = pymupdf.Rect(sel.rect)
+            self._sel_line = tuple(pymupdf.Point(p) for p in sel.line) if sel.line else None
+
+    def _select_drag(self, pos: QPointF):
+        sel = self._selection()
+        if sel is None:
+            return
+        z = self.view.zoom
+        dx, dy = (pos.x() - self._sel_origin.x()) / z, (pos.y() - self._sel_origin.y()) / z
+        w, h = self.width() / z, self.height() / z
+        r = pymupdf.Rect(sel.rect)
+        mode = self._sel_mode
+        if mode == "move":
+            dx = min(max(dx, -r.x0), w - r.x1)  # stay on the page
+            dy = min(max(dy, -r.y0), h - r.y1)
+            self._sel_rect = r + (dx, dy, dx, dy)
+            if sel.line:
+                self._sel_line = tuple(p + (dx, dy) for p in sel.line)
+        elif mode in ("p0", "p1"):
+            ends = list(sel.line)
+            i = int(mode[1])
+            ends[i] = pymupdf.Point(min(max(ends[i].x + dx, 0), w), min(max(ends[i].y + dy, 0), h))
+            self._sel_line = tuple(ends)
+            self._sel_rect = pymupdf.Rect(ends[0], ends[0]) | ends[1]
+        else:
+            x0, y0, x1, y1 = r
+            if "l" in mode:
+                x0 = min(max(x0 + dx, 0), x1 - 4)
+            if "r" in mode:
+                x1 = max(min(x1 + dx, w), x0 + 4)
+            if "t" in mode:
+                y0 = min(max(y0 + dy, 0), y1 - 4)
+            if mode in ("b", "bl", "br"):
+                y1 = max(min(y1 + dy, h), y0 + 4)
+            self._sel_rect = pymupdf.Rect(x0, y0, x1, y1)
+        self.update()
+
+    def _select_release(self):
+        sel = self._selection()
+        rect, line = self._sel_rect, self._sel_line
+        moved = sel is not None and rect is not None and (
+            any(abs(a - b) > 0.5 for a, b in zip(rect, sel.rect))
+            or (line is not None and any(abs(a - b) > 0.5 for p, q in zip(line, sel.line) for a, b in zip(p, q))))
+        self._sel_mode = self._sel_origin = self._sel_rect = self._sel_line = None
+        self.update()
+        if moved:
+            self.view.objectChanged.emit(sel, rect, tuple(tuple(p) for p in line) if line else None)
+
+    def _paint_selection(self, p: QPainter):
+        sel = self._selection()
+        if sel is None:
+            return
+        z = self.view.zoom
+        rect = self._sel_rect or sel.rect
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(ACCENT, 1.5, Qt.PenStyle.DashLine))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        if sel.line is not None:
+            a, b = self._sel_line or sel.line
+            p.drawLine(QPointF(a.x * z, a.y * z), QPointF(b.x * z, b.y * z))
+        else:
+            p.drawRect(QRectF(rect.x0 * z - 2, rect.y0 * z - 2, rect.width * z + 4, rect.height * z + 4))
+        p.setPen(QPen(ACCENT, 1.2))
+        p.setBrush(QColor("white"))
+        s = _HANDLE_PX - 2
+        for hp in self._handle_points(rect, sel).values():
+            p.drawRect(QRectF(hp.x() - s / 2 - 1, hp.y() - s / 2 - 1, s + 2, s + 2))
+
+    def mouseDoubleClickEvent(self, e):
+        sel = self._selection()
+        if self.view.tool == Tool.SELECT and sel is not None and e.button() == Qt.MouseButton.LeftButton:
+            if pymupdf.Point(*self._pt(e.position())) in sel.rect + (-3, -3, 3, 3):
+                self.view.objectActivated.emit(sel)
+                return
+        super().mouseDoubleClickEvent(e)
 
     def paintEvent(self, _event):
         p = QPainter(self)
@@ -110,6 +242,8 @@ class PageWidget(QWidget):
                     p.drawEllipse(box)
                 else:
                     p.drawRect(box)
+        if self.view.tool == Tool.SELECT:
+            self._paint_selection(p)
         if self._stroke:
             pen = QPen(self.view.pen_color, max(1.0, self.view.pen_width * z))
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -123,9 +257,15 @@ class PageWidget(QWidget):
     def mousePressEvent(self, e):
         if e.button() != Qt.MouseButton.LeftButton:
             return
+        if self.view.inline is not None:  # a click outside the text box confirms the edit
+            self.view.finish_inline(commit=True)
+            return
         tool = self.view.tool
         pos = e.position()
-        if tool in RECT_TOOLS or tool in LINE_TOOLS:
+        if tool == Tool.SELECT:
+            self.view.setFocus()  # for Delete and the arrow keys
+            self._select_press(pos)
+        elif tool in RECT_TOOLS or tool in LINE_TOOLS:
             self._drag_start = self._drag_now = pos
         elif tool == Tool.PEN:
             self._stroke = [pos]
@@ -137,7 +277,18 @@ class PageWidget(QWidget):
 
     def mouseMoveEvent(self, e):
         pos = e.position()
-        if self._drag_start is not None:
+        if self._sel_mode is not None:
+            self._select_drag(pos)
+        elif self.view.tool == Tool.SELECT:
+            sel = self._selection()
+            handle = self._handle_at(pos, sel) if sel is not None else None
+            if handle:
+                self.setCursor(_HANDLE_CURSORS[handle])
+            elif sel is not None and sel.movable and pymupdf.Point(*self._pt(pos)) in sel.rect:
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif self._drag_start is not None:
             self._drag_now = QPointF(min(max(pos.x(), 0), self.width()), min(max(pos.y(), 0), self.height()))
             self.update()
         elif self._stroke is not None:
@@ -158,7 +309,9 @@ class PageWidget(QWidget):
     def mouseReleaseEvent(self, e):
         if e.button() != Qt.MouseButton.LeftButton:
             return
-        if self._drag_start is not None:
+        if self._sel_mode is not None:
+            self._select_release()
+        elif self._drag_start is not None:
             a, b = self._pt(self._drag_start), self._pt(self._drag_now or self._drag_start)
             self._drag_start = self._drag_now = None
             self.update()
@@ -187,6 +340,10 @@ class PageView(QScrollArea):
     pointClicked = Signal(int, float, float)
     strokeDrawn = Signal(int, list)
     lineDrawn = Signal(int, object, object)  # page, (x, y) start, (x, y) end
+    objectSelected = Signal(object)  # PageObject or None
+    objectChanged = Signal(object, object, object)  # PageObject, new display rect, new line endpoints or None
+    objectActivated = Signal(object)  # double-clicked PageObject
+    deleteSelection = Signal()
     currentPageChanged = Signal(int)
     zoomChanged = Signal(float)
 
@@ -201,11 +358,14 @@ class PageView(QScrollArea):
         self.pen_color = QColor(0, 0, 0)
         self.pen_width = 2.0
         self.hover_provider = None  # (tool, page, x, y) -> pymupdf.Rect | None
+        self.select_provider = None  # (page, x, y) -> PageObject | None
+        self.selection = None  # the selected PageObject
         self.search_hits: dict[int, list[pymupdf.Rect]] = {}
         self.current_hit: tuple[int, pymupdf.Rect] | None = None
         self._cache: OrderedDict[int, QImage] = OrderedDict()
         self._pages: list[PageWidget] = []
         self._current = 0
+        self.inline: InlineTextEditor | None = None
 
         self._container = QWidget()
         self._container.setObjectName("pageContainer")
@@ -228,6 +388,8 @@ class PageView(QScrollArea):
 
     def reload(self):
         """Re-render after the document changed (content, rotation or page count)."""
+        self.finish_inline(commit=False)  # the text under the box may have changed
+        self.set_selection(None)  # objects are re-read after a change
         self._cache.clear()
         count = self.doc.page_count if self.doc else 0
         while len(self._pages) > count:
@@ -305,6 +467,7 @@ class PageView(QScrollArea):
         zoom = min(max(zoom, self.MIN_ZOOM), self.MAX_ZOOM)
         if not self.doc or abs(zoom - self.zoom) < 1e-3:
             return
+        self.finish_inline(commit=True)
         bar = self.verticalScrollBar()
         frac = bar.value() / max(1, bar.maximum())
         self.zoom = zoom
@@ -331,7 +494,57 @@ class PageView(QScrollArea):
 
     # ---- tools ---------------------------------------------------------------
 
+    def start_inline(self, pno: int, **kwargs) -> InlineTextEditor:
+        """Open a text box on page `pno` (arguments as for `InlineTextEditor`, coordinates in PDF points)."""
+        self.finish_inline(commit=True)
+        commit, cancel = kwargs.pop("on_commit"), kwargs.pop("on_cancel", None)
+
+        def done_commit(result):
+            self.inline = None
+            commit(result)
+
+        def done_cancel():
+            self.inline = None
+            if cancel:
+                cancel()
+
+        self.inline = InlineTextEditor(self._pages[pno], self.zoom, on_commit=done_commit, on_cancel=done_cancel,
+                                       **kwargs)
+        return self.inline
+
+    def finish_inline(self, commit: bool = True):
+        if self.inline is not None and not self.inline.done:
+            (self.inline.commit if commit else self.inline.cancel)()
+        self.inline = None
+
+    def set_selection(self, obj):
+        if obj is None and self.selection is None:
+            return
+        self.selection = obj
+        for w in self._pages:
+            w.update()
+        self.objectSelected.emit(obj)
+
+    def keyPressEvent(self, e):
+        sel = self.selection
+        if self.tool == Tool.SELECT and sel is not None:
+            if e.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self.deleteSelection.emit()
+                return
+            step = 10 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
+            delta = {Qt.Key.Key_Left: (-step, 0), Qt.Key.Key_Right: (step, 0), Qt.Key.Key_Up: (0, -step),
+                     Qt.Key.Key_Down: (0, step)}.get(e.key())
+            if delta and sel.movable:
+                dx, dy = delta
+                line = tuple((p.x + dx, p.y + dy) for p in sel.line) if sel.line else None
+                self.objectChanged.emit(sel, sel.rect + (dx, dy, dx, dy), line)
+                return
+        super().keyPressEvent(e)
+
     def set_tool(self, tool: Tool):
+        self.finish_inline(commit=True)
+        if tool != Tool.SELECT:
+            self.set_selection(None)
         self.tool = tool
         cursor = _CURSORS.get(tool, Qt.CursorShape.CrossCursor)
         for w in self._pages:

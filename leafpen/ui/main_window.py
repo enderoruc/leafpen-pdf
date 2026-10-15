@@ -10,13 +10,14 @@ from PySide6.QtCore import QPointF, QProcess, QRectF, QSettings, QStandardPaths,
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPalette, QPen,
                            QPixmap, QPolygonF)
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter
-from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
+from PySide6.QtWidgets import (QApplication, QColorDialog, QComboBox, QDockWidget, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
                                QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle,
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_ID, APP_NAME, ORG_NAME
-from ..core import signing
+from ..core import richtext, signing
 from ..core.document import PasswordRequired, PdfDocument, PdfError, SearchHit, write_file
+from ..core.richtext import TextStyle
 from ..core.signing import SigningError
 from ..i18n import LANGUAGES, tr
 from . import dialogs
@@ -30,6 +31,19 @@ def _pdf_filter() -> str:
 
 def _megabytes(n: int) -> str:
     return f"{n / 1_048_576:.2f} MB"
+
+
+def _object_label(obj) -> str:
+    """What the select tool has picked, for the properties bar."""
+    if obj.kind == "text":
+        return tr("paragraph")
+    if obj.kind == "image":
+        return tr("image")
+    if obj.kind == "widget":
+        return tr("form field")
+    return {"Square": tr("rectangle"), "Circle": tr("ellipse"), "Line": tr("line"), "Ink": tr("drawing"),
+            "Stamp": tr("stamp"), "Text": tr("note"), "FreeText": tr("text box"),
+            "Highlight": tr("highlight")}.get(obj.subtype, tr("annotation"))
 
 
 def _tool_hint(tool: Tool) -> str:
@@ -54,6 +68,8 @@ def _tool_hint(tool: Tool) -> str:
                         "redactions."),
         Tool.CROP: tr("Crop: drag the area to keep (applies to the selected pages)."),
         Tool.FORM_FIELD: tr("Form field: draw or click where the field should go."),
+        Tool.SELECT: tr("Select: click a shape, stamp, note, image, form field or paragraph to move, resize or "
+                        "restyle it."),
     }[tool]
 
 
@@ -100,6 +116,11 @@ class MainWindow(QMainWindow):
         self.view.pointClicked.connect(self._on_click)
         self.view.strokeDrawn.connect(self._on_stroke)
         self.view.lineDrawn.connect(self._on_line)
+        self.view.select_provider = lambda pno, x, y: self.doc.object_at(pno, x, y)
+        self.view.objectSelected.connect(self._on_selection)
+        self.view.objectChanged.connect(self._on_object_changed)
+        self.view.objectActivated.connect(self._on_object_activated)
+        self.view.deleteSelection.connect(self._delete_selection)
         self.view.currentPageChanged.connect(self._on_page_changed)
         self.view.zoomChanged.connect(lambda _z: self._update_status())
         self.view.pen_color = QColor(self.settings.value("pen_color", "#1d4ed8"))
@@ -271,6 +292,7 @@ class MainWindow(QMainWindow):
         self.tool_actions: dict[Tool, QAction] = {}
         for tool, text, key in (
             (Tool.BROWSE, tr("Browse"), "Esc"),
+            (Tool.SELECT, tr("Select"), "V"),
             (Tool.ADD_TEXT, tr("Add text"), "T"),
             (Tool.EDIT_TEXT, tr("Edit line"), "E"),
             (Tool.EDIT_PARAGRAPH, tr("Edit paragraph"), "Shift+E"),
@@ -387,24 +409,13 @@ class MainWindow(QMainWindow):
         tools.setObjectName("toolsToolbar")
         tools.setMovable(False)
         tools.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        tools.addActions([T[Tool.BROWSE], T[Tool.ADD_TEXT]])
+        tools.addActions([T[Tool.BROWSE], T[Tool.SELECT], T[Tool.ADD_TEXT]])
         tools.addWidget(self._tool_menu_button(tr("Edit text"), [Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH]))
         tools.addActions([T[Tool.HIGHLIGHT], T[Tool.PEN]])
         tools.addWidget(self._tool_menu_button(tr("Shapes"), [Tool.RECT, Tool.ELLIPSE, Tool.LINE, Tool.ARROW]))
         tools.addActions([T[t] for t in (Tool.NOTE, Tool.STAMP, Tool.IMAGE, Tool.SIGNATURE, Tool.REDACT,
                                          Tool.ERASE)])
         tools.addSeparator()
-        tools.addWidget(QLabel(tr(" Color ")))
-        self.color_btn = dialogs.ColorButton(self.view.pen_color)
-        self.color_btn.clicked.disconnect()
-        self.color_btn.clicked.connect(self._pick_color)
-        tools.addWidget(self.color_btn)
-        tools.addWidget(QLabel(tr(" Width ")))
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(1, 12)
-        self.width_spin.setValue(round(self.view.pen_width))
-        self.width_spin.valueChanged.connect(self._set_pen_width)
-        tools.addWidget(self.width_spin)
         tools.addSeparator()
         sign_btn = QToolButton()
         sign_btn.setDefaultAction(self.act_digital)
@@ -412,6 +423,52 @@ class MainWindow(QMainWindow):
         sign_btn.setStyleSheet("QToolButton { font-weight: bold; }")
         tools.addWidget(sign_btn)
         self.addToolBar(tools)
+        self.addToolBarBreak()
+        self.addToolBar(self._build_properties_bar())
+
+    def _build_properties_bar(self) -> QToolBar:
+        """Color, fill, line width/style and opacity: defaults for new items, or the selected item's style."""
+        bar = QToolBar(tr("Properties"))
+        bar.setObjectName("propertiesToolbar")
+        bar.setMovable(False)
+        self.props_label = QLabel()
+        self.props_label.setStyleSheet("color: palette(placeholder-text); padding: 0 6px;")
+        bar.addWidget(self.props_label)
+        bar.addWidget(QLabel(tr(" Color ")))
+        self.color_btn = dialogs.ColorButton(self.view.pen_color)
+        self.color_btn.clicked.disconnect()
+        self.color_btn.clicked.connect(self._pick_color)
+        bar.addWidget(self.color_btn)
+        bar.addWidget(QLabel(tr(" Fill ")))
+        self.fill_btn = QToolButton()
+        self.fill_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.fill_btn.setToolTip(tr("Fill color of rectangles and ellipses"))
+        menu = QMenu(self.fill_btn)
+        menu.addAction(tr("No fill"), lambda: self._set_fill(None))
+        menu.addAction(tr("Choose fill color…"), self._pick_fill)
+        self.fill_btn.setMenu(menu)
+        bar.addWidget(self.fill_btn)
+        bar.addWidget(QLabel(tr(" Width ")))
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(1, 12)
+        self.width_spin.setValue(round(self.view.pen_width))
+        self.width_spin.valueChanged.connect(self._set_pen_width)
+        bar.addWidget(self.width_spin)
+        bar.addWidget(QLabel(tr(" Line ")))
+        self.dash_combo = QComboBox()
+        self.dash_combo.addItem(tr("Solid"), False)
+        self.dash_combo.addItem(tr("Dashed"), True)
+        self.dash_combo.activated.connect(lambda _i: self._set_dashed(self.dash_combo.currentData()))
+        bar.addWidget(self.dash_combo)
+        bar.addWidget(QLabel(tr(" Opacity ")))
+        self.opacity_spin = QSpinBox()
+        self.opacity_spin.setRange(10, 100)
+        self.opacity_spin.setSingleStep(10)
+        self.opacity_spin.setSuffix(" %")
+        self.opacity_spin.valueChanged.connect(lambda v: self._set_opacity(v / 100))
+        bar.addWidget(self.opacity_spin)
+        self._show_defaults()
+        return bar
 
     # ---- state helpers -----------------------------------------------------
 
@@ -459,6 +516,7 @@ class MainWindow(QMainWindow):
 
     def _run(self, fn, pages: list[int] | None = None) -> bool:
         """Run a document edit, reporting user-facing errors."""
+        self.view.finish_inline(commit=True)  # an open text box is applied first
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             try:
@@ -483,14 +541,140 @@ class MainWindow(QMainWindow):
                 checked.setChecked(False)
         self.statusBar().showMessage(_tool_hint(tool))
 
+    # ---- properties bar ----------------------------------------------------------
+    # With an object selected the bar edits that object; otherwise it holds the defaults for new items.
+
+    def _default_fill(self) -> QColor | None:
+        value = str(self.settings.value("fill_color", ""))
+        return QColor(value) if value else None
+
+    def _default_dashed(self) -> bool:
+        return str(self.settings.value("line_dashed", "false")) == "true"
+
+    def _default_opacity(self) -> float:
+        return float(self.settings.value("opacity", 1.0))
+
+    def _show_fill(self, color: QColor | None):
+        pix = QPixmap(28, 16)
+        pix.fill(color if color is not None else QColor("white"))
+        p = QPainter(pix)
+        p.setPen(QPen(QColor("#888"), 1))
+        p.drawRect(0, 0, 27, 15)
+        if color is None:  # "no fill": a red diagonal
+            p.setPen(QPen(QColor(220, 38, 38), 2))
+            p.drawLine(2, 14, 26, 2)
+        p.end()
+        self.fill_btn.setIcon(QIcon(pix))
+        self.fill_btn.setIconSize(pix.size())
+
+    def _show_style(self, color: QColor, fill: QColor | None, width: float, dashed: bool, opacity: float):
+        for w in (self.width_spin, self.dash_combo, self.opacity_spin):
+            w.blockSignals(True)
+        self.color_btn.set_color(color)
+        self._show_fill(fill)
+        self.width_spin.setValue(max(1, round(width)))
+        self.dash_combo.setCurrentIndex(1 if dashed else 0)
+        self.opacity_spin.setValue(round(opacity * 100))
+        for w in (self.width_spin, self.dash_combo, self.opacity_spin):
+            w.blockSignals(False)
+
+    def _show_defaults(self):
+        self.props_label.setText(tr("New items:"))
+        self._show_style(self.view.pen_color, self._default_fill(), self.view.pen_width, self._default_dashed(),
+                         self._default_opacity())
+
+    def _on_selection(self, obj):
+        if obj is None:
+            self._show_defaults()
+            return
+        self.props_label.setText(tr("Selected {kind}:", kind=_object_label(obj)))
+        color = QColor.fromRgbF(*obj.stroke) if obj.stroke else self.view.pen_color
+        fill = QColor.fromRgbF(*obj.fill) if obj.fill else None
+        self._show_style(color, fill, obj.width or self.view.pen_width, obj.dashed, obj.opacity)
+        if obj.movable:
+            hint = tr("Drag to move, drag the handles to resize. Delete removes it; double-click edits it.")
+        else:
+            hint = tr("This object cannot be moved here; you can change its color or delete it.")
+        self.statusBar().showMessage(hint)
+
+    def _style_selection(self, **style) -> bool:
+        """Apply a style change to the selected object. Returns False if nothing styleable is selected."""
+        obj = self.view.selection
+        if obj is None or not obj.styleable:
+            return False
+        if self._run(lambda: self.doc.style_object(obj, **style), [obj.page]):
+            self._reselect(obj.page, obj.rect)
+        return True
+
+    def _reselect(self, pno: int, rect: pymupdf.Rect, line=None):
+        """Select the object now at `rect` (objects are re-read after every change)."""
+        if line is not None:
+            (x0, y0), (x1, y1) = line
+            x, y = (x0 + x1) / 2, (y0 + y1) / 2
+        else:
+            x, y = (rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2
+        obj = self.doc.object_at(pno, x, y) or self.doc.object_at(pno, rect.x0 + 2, rect.y0 + 2)
+        self.view.set_selection(obj)
+
     def _pick_color(self):
         self.color_btn._pick()
-        self.view.pen_color = self.color_btn.color
-        self.settings.setValue("pen_color", self.color_btn.color.name())
+        if not self._style_selection(stroke=dialogs.rgb(self.color_btn.color)):
+            self.view.pen_color = self.color_btn.color
+            self.settings.setValue("pen_color", self.color_btn.color.name())
+
+    def _pick_fill(self):
+        current = self._default_fill() or QColor("white")
+        color = QColorDialog.getColor(current, self, tr("Fill color"))
+        if color.isValid():
+            self._set_fill(color)
+
+    def _set_fill(self, color: QColor | None):
+        self._show_fill(color)
+        if not self._style_selection(fill=dialogs.rgb(color) if color is not None else None):
+            self.settings.setValue("fill_color", color.name() if color is not None else "")
 
     def _set_pen_width(self, value: int):
-        self.view.pen_width = float(value)
-        self.settings.setValue("pen_width", value)
+        if not self._style_selection(width=float(value)):
+            self.view.pen_width = float(value)
+            self.settings.setValue("pen_width", value)
+
+    def _set_dashed(self, dashed: bool):
+        if not self._style_selection(dashed=dashed):
+            self.settings.setValue("line_dashed", "true" if dashed else "false")
+
+    def _set_opacity(self, opacity: float):
+        if not self._style_selection(opacity=opacity):
+            self.settings.setValue("opacity", opacity)
+
+    # ---- select tool -------------------------------------------------------------
+
+    def _on_object_changed(self, obj, rect, line):
+        if self._run(lambda: self.doc.transform_object(obj, rect, line), [obj.page]):
+            self._reselect(obj.page, rect, line)
+
+    def _delete_selection(self):
+        obj = self.view.selection
+        if obj is not None:
+            self._run(lambda: self.doc.delete_object(obj), [obj.page])
+
+    def _on_object_activated(self, obj):
+        if obj.kind == "text":
+            self._start_edit_paragraph(obj.block)
+        elif obj.kind == "widget":
+            self.forms_dock.show()
+        elif obj.kind == "annot" and obj.subtype == "Text":
+            dlg = dialogs.NoteDialog(self, self.doc.object_text(obj))
+            if dlg.exec():
+                text = dlg.text.toPlainText()
+                if self._run(lambda: self.doc.set_note_text(obj.page, obj.xref, text), [obj.page]) and text.strip():
+                    self._reselect(obj.page, obj.rect)
+        elif obj.kind == "annot" and obj.subtype == "Stamp":
+            color = QColor.fromRgbF(*obj.stroke) if obj.stroke else QColor("#c81e1e")
+            dlg = dialogs.StampDialog(self, self.doc.object_text(obj), color)
+            if dlg.exec():
+                text, new_color = dlg.text.currentText(), dialogs.rgb(dlg.color.color)
+                if self._run(lambda: self.doc.set_stamp_text(obj, text, new_color), [obj.page]):
+                    self._reselect(obj.page, obj.rect)
 
     def _last_dir(self) -> str:
         return self.settings.value(
@@ -499,6 +683,7 @@ class MainWindow(QMainWindow):
     # ---- files ---------------------------------------------------------------
 
     def _confirm_discard(self) -> bool:
+        self.view.finish_inline(commit=True)
         if not self.doc or not self.doc.dirty:
             return True
         r = QMessageBox.question(
@@ -592,6 +777,7 @@ class MainWindow(QMainWindow):
     def save(self) -> bool:
         if not self.doc:
             return False
+        self.view.finish_inline(commit=True)
         if not self.doc.path:
             return self.save_as()
         if not self._confirm_pending_redactions() or not self._confirm_breaking_signatures():
@@ -601,6 +787,7 @@ class MainWindow(QMainWindow):
     def save_as(self) -> bool:
         if not self.doc:
             return False
+        self.view.finish_inline(commit=True)
         if not self._confirm_pending_redactions() or not self._confirm_breaking_signatures():
             return False
         path, _ = QFileDialog.getSaveFileName(self, tr("Save as"), self.doc.path or self._last_dir(),
@@ -678,11 +865,13 @@ class MainWindow(QMainWindow):
     # ---- edit ----------------------------------------------------------------
 
     def undo(self):
+        self.view.finish_inline(commit=True)
         if self.doc and self.doc.can_undo():
             self.doc.undo()
             self._changed()
 
     def redo(self):
+        self.view.finish_inline(commit=True)
         if self.doc and self.doc.can_redo():
             self.doc.redo()
             self._changed()
@@ -741,14 +930,7 @@ class MainWindow(QMainWindow):
     def _on_click(self, pno: int, x: float, y: float):
         tool = self.view.tool
         if tool == Tool.ADD_TEXT:
-            dlg = dialogs.TextDialog(self, self.view.pen_color, float(self.settings.value("text_size", 12)),
-                                     self.settings.value("text_family", "sans"))
-            if dlg.exec() and dlg.text.toPlainText().strip():
-                self.settings.setValue("text_size", dlg.size.value())
-                self.settings.setValue("text_family", dlg.family.currentData())
-                self._run(lambda: self.doc.add_text(
-                    pno, x, y, dlg.text.toPlainText(), dlg.size.value(), dialogs.rgb(dlg.color.color),
-                    dlg.family.currentData(), dlg.bold.isChecked()), [pno])
+            self._start_add_text(pno, x, y)
         elif tool in (Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH):
             item = self._text_item_at("lines" if tool == Tool.EDIT_TEXT else "blocks", pno, x, y)
             if item is None:
@@ -756,17 +938,16 @@ class MainWindow(QMainWindow):
                                                  "image and cannot be edited.)"), 5000)
                 return
             if tool == Tool.EDIT_TEXT:
-                dlg = dialogs.EditLineDialog(self, item.text, item.size)
-                if dlg.exec() and (dlg.text.text() != item.text or dlg.size.value() != item.size):
-                    self._run(lambda: self.doc.replace_line(item, dlg.text.text(), dlg.size.value()), [pno])
+                self._start_edit_line(item)
             else:
-                dlg = dialogs.EditParagraphDialog(self, item.text, item.size)
-                text = dlg.text.toPlainText
-                if dlg.exec() and (text() != item.text or dlg.size.value() != item.size):
-                    self._run(lambda: self.doc.replace_block(item, text(), dlg.size.value()), [pno])
+                self._start_edit_paragraph(item)
         elif tool == Tool.NOTE:
             existing = self.doc.note_at(pno, x, y)
-            dlg = dialogs.NoteDialog(self, existing[1] if existing else "")
+            if existing:
+                dlg = dialogs.NoteDialog(self, existing[1])
+            else:
+                dlg = dialogs.NoteDialog(self, new=True, color=QColor(self.settings.value("note_color", "#ffd933")),
+                                         icon=str(self.settings.value("note_icon", "Note")))
             if not dlg.exec():
                 return
             text = dlg.text.toPlainText()
@@ -774,7 +955,10 @@ class MainWindow(QMainWindow):
                 if text != existing[1]:
                     self._run(lambda: self.doc.set_note_text(pno, existing[0], text), [pno])
             elif text.strip():
-                self._run(lambda: self.doc.add_note(pno, x, y, text), [pno])
+                icon, color = dlg.icon.currentData(), dlg.color.color
+                self.settings.setValue("note_icon", icon)
+                self.settings.setValue("note_color", color.name())
+                self._run(lambda: self.doc.add_note(pno, x, y, text, dialogs.rgb(color), icon), [pno])
         elif tool == Tool.ERASE:
             if self.doc.annot_rect_at(pno, x, y) is None:
                 self.statusBar().showMessage(tr("There is no annotation to erase here. Use Undo (Ctrl+Z) for "
@@ -782,13 +966,79 @@ class MainWindow(QMainWindow):
                 return
             self._run(lambda: self.doc.delete_annot_at(pno, x, y), [pno])
 
+    # ---- on-page text editing ----------------------------------------------------
+
+    def _text_style(self) -> TextStyle:
+        """The style new text starts with (remembered from the last text added)."""
+        return TextStyle(str(self.settings.value("text_family", "sans")),
+                         str(self.settings.value("text_bold", "false")) == "true",
+                         str(self.settings.value("text_italic", "false")) == "true",
+                         float(self.settings.value("text_size", 12)), dialogs.rgb(self.view.pen_color))
+
+    def _remember_text_style(self, style: TextStyle):
+        self.settings.setValue("text_family", style.family)
+        self.settings.setValue("text_bold", "true" if style.bold else "false")
+        self.settings.setValue("text_italic", "true" if style.italic else "false")
+        self.settings.setValue("text_size", style.size)
+
+    def _start_add_text(self, pno: int, x: float, y: float):
+        style = self._text_style()
+        width = self.doc.default_text_width(pno, x, style.size)
+
+        def commit(r):
+            if not r.runs or not "".join(run.text for run in r.runs).strip():
+                return
+            self._remember_text_style(r.runs[0].style)
+            self.settings.setValue("text_align", r.align)
+            self._run(lambda: self.doc.add_text(pno, x, y, r.runs, align=r.align, line_height=r.line_height,
+                                                width=r.width), [pno])
+
+        self.view.start_inline(pno, x=x, top=y, width=width, runs=[], default=style, paragraph=True,
+                               align=str(self.settings.value("text_align", "left")), on_commit=commit)
+        self.statusBar().showMessage(tr("Type the text. Ctrl+Enter or a click outside the box adds it; Esc "
+                                        "cancels."))
+
+    def _start_edit_line(self, line):
+        def commit(r):
+            if r.runs != line.runs:
+                self._run(lambda: self.doc.replace_line(line, r.runs), [line.page])
+
+        self.view.start_inline(line.page, x=line.rect.x0, top=line.rect.y0, width=line.rect.width, runs=line.runs,
+                               default=line.runs[0].style if line.runs else self._text_style(), paragraph=False,
+                               min_height=line.rect.height, on_commit=commit)
+        self.statusBar().showMessage(tr("Edit the line. Ctrl+Enter or a click outside the box applies it; Esc "
+                                        "cancels. Leave it empty to delete the line."))
+
+    def _start_edit_paragraph(self, block):
+        def commit(r):
+            if (r.runs, r.align, round(r.line_height, 2), round(r.width, 1)) == (
+                    block.runs, block.align, round(block.line_height, 2), round(block.width, 1)):
+                return
+            overlaps = []
+            if self._run(lambda: overlaps.append(self.doc.replace_block(
+                    block, r.runs, align=r.align, line_height=r.line_height, width=r.width)), [block.page]):
+                if overlaps and overlaps[0]:
+                    self.statusBar().showMessage(tr("The paragraph now overlaps the text below it. Make it "
+                                                    "shorter or wider, or undo with Ctrl+Z."), 10000)
+
+        first = block.runs[0].style if block.runs else TextStyle(size=block.size)
+        top = block.first_baseline - richtext.ascent(first)
+        self.view.start_inline(block.page, x=block.left, top=min(top, block.rect.y0), width=block.width,
+                               runs=block.runs, default=block.runs[0].style if block.runs else self._text_style(),
+                               paragraph=True, align=block.align, line_height=block.line_height,
+                               min_height=block.rect.height, on_commit=commit)
+        self.statusBar().showMessage(tr("Edit the paragraph. Ctrl+Enter or a click outside the box applies it; "
+                                        "Esc cancels. Drag the blue handle to change the width."))
+
     def _on_stroke(self, pno: int, points: list):
-        self._run(lambda: self.doc.add_ink(pno, [points], dialogs.rgb(self.view.pen_color), self.view.pen_width), [pno])
+        self._run(lambda: self.doc.add_ink(pno, [points], dialogs.rgb(self.view.pen_color), self.view.pen_width,
+                                           opacity=self._default_opacity()), [pno])
 
     def _on_line(self, pno: int, start, end):
         arrow = self.view.tool == Tool.ARROW
         self._run(lambda: self.doc.add_line(pno, start, end, dialogs.rgb(self.view.pen_color),
-                                            self.view.pen_width, arrow), [pno])
+                                            self.view.pen_width, arrow, dashed=self._default_dashed(),
+                                            opacity=self._default_opacity()), [pno])
 
     @staticmethod
     def _box_at(rect: pymupdf.Rect, width: float, aspect: float, page_size) -> pymupdf.Rect:
@@ -831,8 +1081,11 @@ class MainWindow(QMainWindow):
             self._finish_digital_sign(request, pno, box)
         elif tool in (Tool.RECT, Tool.ELLIPSE):
             kind = "rect" if tool == Tool.RECT else "ellipse"
+            fill = self._default_fill()
             self._run(lambda: self.doc.add_shape(pno, kind, rect, dialogs.rgb(self.view.pen_color),
-                                                 self.view.pen_width), [pno])
+                                                 self.view.pen_width, fill=dialogs.rgb(fill) if fill else None,
+                                                 dashed=self._default_dashed(), opacity=self._default_opacity()),
+                      [pno])
         elif tool == Tool.STAMP:
             dlg = dialogs.StampDialog(self, self.settings.value("stamp_text", ""),
                                       QColor(self.settings.value("stamp_color", "#c81e1e")))

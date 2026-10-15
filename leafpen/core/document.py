@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 import pymupdf
 
 from ..i18n import fmt_date, tr
-from . import fonts
+from . import fonts, richtext
+from .richtext import TextRun, TextStyle
 
 pymupdf.TOOLS.mupdf_display_errors(False)
 
@@ -119,6 +120,8 @@ class TextLine:
     italic: bool
     origin: pymupdf.Point  # unrotated baseline start
     bbox: pymupdf.Rect  # unrotated
+    runs: list[TextRun] = field(default_factory=list)  # the line with its styles
+    base: pymupdf.Point | None = None  # display baseline start
 
 
 @dataclass
@@ -133,7 +136,11 @@ class TextBlock:
     italic: bool
     line_rects: list[pymupdf.Rect]  # display coordinates
     line_height: float  # baseline distance as a multiple of the font size
-
+    runs: list[TextRun] = field(default_factory=list)  # the paragraph with its styles
+    align: str = "left"
+    left: float = 0.0  # display x of the text box
+    width: float = 0.0  # wrapping width of the text box
+    first_baseline: float = 0.0  # display y
 
 @dataclass
 class FormField:
@@ -158,8 +165,49 @@ class Bookmark:
     page: int  # 0-based; -1 if the bookmark points nowhere in this document
 
 
+_UNSET = object()
+
+_MOVABLE = {"Square", "Circle", "Line", "Ink", "Stamp", "Text", "FreeText"}
+_RESIZABLE = _MOVABLE - {"Text"}  # a sticky note is an icon
+_FILLABLE = {"Square", "Circle"}
+_BORDERED = {"Square", "Circle", "Line", "Ink", "Polygon", "PolyLine"}
+
+
+@dataclass
+class PageObject:
+    """Something the select tool can pick: an annotation, form field, image or paragraph."""
+    page: int
+    kind: str  # "annot" | "widget" | "image" | "text"
+    xref: int  # -1 for text
+    subtype: str  # annotation subtype ("Square", "Line", ...), widget type, "Image" or "Text"
+    rect: pymupdf.Rect  # display coordinates
+    movable: bool
+    resizable: bool
+    stroke: tuple | None = None
+    fill: tuple | None = None
+    width: float | None = None
+    dashed: bool = False
+    opacity: float = 1.0
+    line: tuple[pymupdf.Point, pymupdf.Point] | None = None  # display endpoints of a line
+    block: "TextBlock | None" = None
+
+    @property
+    def styleable(self) -> bool:
+        return self.kind in ("annot", "text")
+
+
+def _dashes(width: float) -> list[int]:
+    # Integers: PyMuPDF silently ignores a dash array of floats.
+    return [max(3, round(width * 3)), max(2, round(width * 2))]
+
+
+# Private annotation key holding the color of stamps made by this app, so they can be redrawn.
+_STAMP_COLOR_KEY = "LeafpenStampColor"
+
 _KEEP = pymupdf.PDF_ENCRYPT_KEEP
 _SKIP_ANNOTS = (pymupdf.PDF_ANNOT_POPUP, pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_WIDGET)
+
+NOTE_ICONS = ("Note", "Comment", "Help", "Key", "Insert", "Paragraph", "NewParagraph")
 
 FIELD_KINDS = ("text", "multiline", "checkbox", "combobox", "listbox")
 _WIDGET_TYPES = {
@@ -198,6 +246,34 @@ def _fold_char(c: str) -> str:
 def _fold(text: str) -> str:
     """Case-fold one character at a time, so indexes stay aligned with the original text."""
     return "".join(_fold_char(c) for c in text)
+
+
+def _span_style(span: dict) -> TextStyle:
+    family, bold, italic = fonts.classify(span["font"], span["flags"])
+    c = span["color"]
+    return TextStyle(family, bold, italic, round(span["size"], 1),
+                     ((c >> 16 & 255) / 255, (c >> 8 & 255) / 255, (c & 255) / 255))
+
+
+def _span_runs(spans: list[dict]) -> list[TextRun]:
+    return richtext.strip([TextRun(s["text"], _span_style(s)) for s in spans])
+
+
+def _join_line_runs(lines: list[list[TextRun]]) -> list[TextRun]:
+    """Join the styled lines of a paragraph, undoing hyphenation at line ends."""
+    out: list[TextRun] = []
+    for runs in lines:
+        runs = richtext.strip(runs)
+        if not runs:
+            continue
+        if out:
+            prev = out[-1].text
+            if prev.endswith("-") and len(prev) > 1 and prev[-2].isalpha() and runs[0].text[:1].islower():
+                out[-1] = TextRun(prev[:-1], out[-1].style)
+            else:
+                out[-1] = TextRun(prev + " ", out[-1].style)
+        out.extend(runs)
+    return richtext.normalize(out)
 
 
 def _join_lines(lines: list[str]) -> str:
@@ -450,10 +526,11 @@ class PdfDocument:
                     if s["text"].strip():
                         bbox |= pymupdf.Rect(s["bbox"])
                 size, color, family, bold, italic = _dominant_style(spans)
+                origin = pymupdf.Point(spans[0]["origin"])
                 lines.append(TextLine(
                     page=pno, rect=bbox * to_display, text=text, size=size, color=color,
-                    family=family, bold=bold, italic=italic,
-                    origin=pymupdf.Point(spans[0]["origin"]), bbox=bbox,
+                    family=family, bold=bold, italic=italic, origin=origin, bbox=bbox,
+                    runs=_span_runs(spans), base=origin * to_display,
                 ))
         lines.sort(key=lambda l: (round(l.rect.y0), l.rect.x0))
         return lines
@@ -461,8 +538,8 @@ class PdfDocument:
     def text_blocks(self, pno: int) -> list[TextBlock]:
         """Paragraphs whose lines all read left-to-right for the viewer.
 
-        Unrotated pages use MuPDF's text blocks. On rotated pages MuPDF puts each
-        line in its own block, so lines are regrouped by their layout.
+        Starts from MuPDF's text blocks, then joins blocks that continue each other:
+        many PDF generators (and every rotated page) put each line in its own block.
         """
         page = self._doc[pno]
         to_display = page.rotation_matrix
@@ -482,13 +559,13 @@ class PdfDocument:
                 r = pymupdf.Rect(spans[0]["bbox"])
                 for s in spans:
                     r |= pymupdf.Rect(s["bbox"])
+                size, _color, family, bold, italic = _dominant_style(spans)
                 lines.append({"text": "".join(s["text"] for s in line["spans"]), "rect": r * to_display,
                               "base": pymupdf.Point(spans[0]["origin"]) * to_display, "spans": spans,
-                              "size": _dominant_style(spans)[0]})
+                              "all": line["spans"], "size": size, "style": (family, bold, italic)})
             if ok and lines:
                 groups.append(lines)
-        if page.rotation:
-            groups = self._regroup_lines([l for g in groups for l in g])
+        groups = self._join_groups(groups)
 
         blocks = []
         for lines in groups:
@@ -499,64 +576,129 @@ class PdfDocument:
                 rect |= r
             gaps = [b["base"].y - a["base"].y for a, b in zip(lines, lines[1:]) if b["base"].y > a["base"].y]
             line_height = (sum(gaps) / len(gaps) / size) if gaps and size else 1.2
+            align = richtext.detect_align(rects, size)
+            # Wrapping width: wide enough for every original line (+ a hair), so unchanged text
+            # breaks at the same places.
+            widest = max(r.width for r in rects)
+            width = (rect.width if align == "justify" else widest) + 0.5
+            left = {"center": (rect.x0 + rect.x1 - width) / 2, "right": rect.x1 - width}.get(align, rect.x0)
             blocks.append(TextBlock(pno, rect, _join_lines([l["text"] for l in lines]), size, color, family,
-                                    bold, italic, rects, max(1.0, min(line_height, 2.5))))
+                                    bold, italic, rects, max(1.0, min(line_height, 2.5)),
+                                    runs=_join_line_runs([_span_runs(l["all"]) for l in lines]), align=align,
+                                    left=left, width=width, first_baseline=lines[0]["base"].y))
         blocks.sort(key=lambda b: (round(b.rect.y0), b.rect.x0))
         return blocks
 
     @staticmethod
-    def _regroup_lines(lines: list[dict]) -> list[list[dict]]:
-        """Group display-space lines into paragraphs: same size, stacked closely, overlapping horizontally."""
-        lines.sort(key=lambda l: (l["base"].y, l["rect"].x0))
-        groups: list[list[dict]] = []
-        for line in lines:
-            r, size = line["rect"], line["size"]
-            for g in groups:
-                last = g[-1]
+    def _join_groups(groups: list[list[dict]]) -> list[list[dict]]:
+        """Join line groups that read as one paragraph: same style, stacked at the paragraph's line spacing,
+        starting at about the same x (a first-line indent is allowed)."""
+
+        def spacing(g: list[dict]) -> float | None:
+            gaps = [b["base"].y - a["base"].y for a, b in zip(g, g[1:])]
+            return sum(gaps) / len(gaps) if gaps else None
+
+        groups = sorted(groups, key=lambda g: (g[0]["base"].y, g[0]["rect"].x0))
+        out: list[list[dict]] = []
+        for g in groups:
+            first = g[0]
+            r, size = first["rect"], first["size"]
+            for p in out:
+                last = p[-1]
                 lr = last["rect"]
-                gap = line["base"].y - last["base"].y
+                gap = first["base"].y - last["base"].y
                 overlap = min(r.x1, lr.x1) - max(r.x0, lr.x0)
-                if (0 < gap <= 1.8 * size and abs(last["size"] - size) <= 0.15 * size
-                        and abs(r.x0 - lr.x0) <= 2 * size and overlap > 0.3 * min(r.width, lr.width)):
-                    g.append(line)
-                    break
+                tol = max(1.5, size * 0.15)
+                aligned = (abs(r.x0 - lr.x0) <= 2 * size  # left (a first-line indent is allowed)
+                           or abs((r.x0 + r.x1) - (lr.x0 + lr.x1)) / 2 <= tol  # centered
+                           or abs(r.x1 - lr.x1) <= tol)  # right
+                if not (0 < gap <= 1.8 * size and abs(last["size"] - size) <= 0.15 * size
+                        and last["style"] == first["style"]
+                        and aligned and overlap > 0.3 * min(r.width, lr.width)):
+                    continue
+                # A larger gap than the lines already have marks a new paragraph.
+                if any(s is not None and gap > 1.2 * s for s in (spacing(p), spacing(g))):
+                    continue
+                p.extend(g)
+                break
             else:
-                groups.append([line])
-        return groups
+                out.append(list(g))
+        return out
 
-    def replace_block(self, block: TextBlock, new_text: str, size: float | None = None) -> None:
-        """Rewrite a paragraph, re-flowing it inside the paragraph's width.
-
-        The paragraph may grow downwards (up to the bottom margin) if the new text is longer.
-        """
-        page = self._doc[block.page]
-        if any(a.type[0] == pymupdf.PDF_ANNOT_REDACT for a in page.annots()):
+    def _check_no_pending_redactions(self, pno: int) -> None:
+        if any(True for _ in self._doc[pno].annots(types=[pymupdf.PDF_ANNOT_REDACT])):
             raise PdfError(tr("This page has pending redaction marks; editing text would apply them too. "
                               "Remove those marks first."))
-        size = size or block.size
+
+    @staticmethod
+    def _erase_text(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> None:
+        """Remove the text in these display rects (shrunk vertically so neighbouring lines survive)."""
+        for r in rects:
+            inset = r.height * 0.25
+            page.add_redact_annot(pymupdf.Rect(r.x0, r.y0 + inset, r.x1, r.y1 - inset) * page.derotation_matrix,
+                                  fill=False)
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+
+    def _write_runs(self, page: pymupdf.Page, runs: list[TextRun], left: float, first_baseline: float,
+                    width: float, align: str, line_height: float, too_long: str) -> pymupdf.Rect:
+        """Lay out and write styled text; returns the display rect it occupies."""
+        lines = richtext.layout(runs, width, align, line_height)
+        top = first_baseline - lines[0].ascent
+        rect = pymupdf.Rect(left, top, left + width, top + richtext.height(lines))
+        ink = [(left + f.x, left + f.x + richtext.measure(f.text, f.style))
+               for line in lines for f in line.fragments if f.text.strip()]
+        outside_x = ink and (min(a for a, _ in ink) < -0.5 or max(b for _, b in ink) > page.rect.width + 0.5)
+        if rect.y1 > page.rect.height + 0.5 or rect.y0 < -0.5 or outside_x:
+            raise PdfError(too_long)
+        m = page.derotation_matrix
+        for line in lines:
+            y = first_baseline + line.baseline
+            for frag in line.fragments:
+                if not frag.text.strip():
+                    continue
+                st = frag.style
+                page.insert_text(pymupdf.Point(left + frag.x, y) * m, frag.text, fontsize=st.size, color=st.color,
+                                 rotate=page.rotation, **fonts.font_args(st.family, st.bold, st.italic))
+        fonts.fix_space_mapping(self._doc, page)
+        if align == "left":  # the text box is as wide as the page allows; report what is used
+            rect.x1 = left + max(l.width for l in lines)
+        return rect
+
+    @staticmethod
+    def _as_runs(content: str | list[TextRun], style: TextStyle) -> list[TextRun]:
+        if isinstance(content, str):
+            return richtext.strip([TextRun(content, style)])
+        return richtext.strip(list(content))
+
+    def replace_block(self, block: TextBlock, content: str | list[TextRun], size: float | None = None,
+                      align: str | None = None, line_height: float | None = None,
+                      width: float | None = None) -> bool:
+        """Rewrite a paragraph, re-flowing it inside the paragraph's box.
+
+        `content` is plain text (written in the paragraph's main style, at `size` if given) or
+        styled runs. The paragraph keeps its position and may grow downwards if the new text is
+        longer. Returns True if it now overlaps other text below it.
+        """
+        self._check_no_pending_redactions(block.page)
+        style = TextStyle(block.family, block.bold, block.italic, size or block.size, block.color)
+        runs = self._as_runs(content, style)
+        others = [b.rect for b in self.text_blocks(block.page) if not b.rect.intersects(block.rect)]
         with self._edit():
             page = self._doc[block.page]
-            for r in block.line_rects:
-                inset = r.height * 0.25
-                page.add_redact_annot(pymupdf.Rect(r.x0, r.y0 + inset, r.x1, r.y1 - inset) * page.derotation_matrix,
-                                      fill=False)
-            page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
-                                  graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
-            text = new_text.strip()
-            if not text:
-                return
-            disp = page.rect
-            # insert_textbox puts the first baseline about one font size below the top.
-            top = block.line_rects[0].y1 - size * 1.1
-            box = pymupdf.Rect(block.rect.x0, top, max(block.rect.x1, block.rect.x0 + 4 * size) + size * 0.3,
-                               max(disp.y1 - 18, block.rect.y1))
-            rc = page.insert_textbox(box * page.derotation_matrix, text, fontsize=size, color=block.color,
-                                     rotate=page.rotation, lineheight=block.line_height,
-                                     **fonts.font_args(block.family, block.bold, block.italic))
-            if rc < 0:
-                raise PdfError(tr("The paragraph does not fit on the page. Shorten the text or choose a "
-                                  "smaller size."))
-            fonts.fix_space_mapping(self._doc, page)
+            self._erase_text(page, block.line_rects)
+            if not runs:
+                return False
+            align = align or block.align
+            box_width = width or block.width
+            left = block.left
+            if width and align in ("center", "right"):  # keep the paragraph's anchor
+                anchor = block.left + block.width / (2 if align == "center" else 1)
+                left = anchor - box_width / (2 if align == "center" else 1)
+            rect = self._write_runs(page, runs, left, block.first_baseline, box_width, align,
+                                    line_height or block.line_height,
+                                    tr("The paragraph does not fit on the page. Shorten the text or choose a "
+                                       "smaller size."))
+        return any(rect.intersects(o) for o in others)
 
     def block_at(self, pno: int, x: float, y: float) -> TextBlock | None:
         p = pymupdf.Point(x, y)
@@ -754,43 +896,40 @@ class PdfDocument:
                 return line
         return None
 
-    def replace_line(self, line: TextLine, new_text: str, size: float | None = None) -> None:
-        """Replace an existing line of text, keeping its position, color and style."""
-        page = self._doc[line.page]
-        if any(a.type[0] == pymupdf.PDF_ANNOT_REDACT for a in page.annots()):
-            raise PdfError(tr("This page has pending redaction marks; editing text would apply them too. "
-                              "Remove those marks first."))
+    def replace_line(self, line: TextLine, content: str | list[TextRun], size: float | None = None) -> None:
+        """Replace an existing line of text, keeping its position (and its color and style for plain text)."""
+        self._check_no_pending_redactions(line.page)
+        runs = self._as_runs(content, TextStyle(line.family, line.bold, line.italic, size or line.size, line.color))
+        runs = [TextRun(" ".join(r.text.splitlines()), r.style) for r in runs]  # a line has no breaks
         with self._edit():
             page = self._doc[line.page]
-            # Shrink across the text direction (vertically for the viewer) so glyphs
-            # of neighbouring lines are not caught.
-            r = line.rect
-            inset = r.height * 0.25
-            area = pymupdf.Rect(r.x0, r.y0 + inset, r.x1, r.y1 - inset) * page.derotation_matrix
-            page.add_redact_annot(area, fill=False)
-            page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
-                                  graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
-            if new_text.strip():
-                page.insert_text(line.origin, new_text, fontsize=size or line.size, color=line.color,
-                                 rotate=page.rotation, **fonts.font_args(line.family, line.bold, line.italic))
-                fonts.fix_space_mapping(self._doc, page)
+            self._erase_text(page, [line.rect])
+            if runs:
+                base = line.base if line.base is not None else line.origin * page.rotation_matrix
+                self._write_runs(page, runs, base.x, base.y, 1e6, "left", 1.2,
+                                 tr("The text does not fit on the page. Choose a smaller size or a "
+                                    "higher position."))
 
-    def add_text(self, pno: int, x: float, y: float, text: str, size: float = 12,
-                 color=(0, 0, 0), family: str = "sans", bold: bool = False, italic: bool = False) -> None:
-        """Write text with its top-left corner at (x, y), wrapping at the right page margin."""
-        if not text.strip():
-            return
-        page = self._doc[pno]
-        disp = page.rect
-        right = max(disp.x1 - 18, x + 4 * size)
-        box = pymupdf.Rect(x, y, right, disp.y1) * page.derotation_matrix
+    def default_text_width(self, pno: int, x: float, size: float = 12) -> float:
+        """Width of a new text box at x: up to the right page margin."""
+        return max(self._doc[pno].rect.width - 18 - x, 4 * size)
+
+    def add_text(self, pno: int, x: float, y: float, content: str | list[TextRun], size: float = 12,
+                 color=(0, 0, 0), family: str = "sans", bold: bool = False, italic: bool = False,
+                 align: str = "left", line_height: float = 1.2, width: float | None = None) -> pymupdf.Rect | None:
+        """Write text with its top-left corner at (x, y), wrapping at `width` (default: the right page margin).
+
+        `content` is plain text in the given style, or styled runs. Returns the display rect written.
+        """
+        runs = self._as_runs(content, TextStyle(family, bold, italic, size, tuple(color)))
+        if not runs:
+            return None
+        width = width or self.default_text_width(pno, x, max(r.style.size for r in runs))
+        first = richtext.layout(runs, width, align, line_height)[0]
         with self._edit():
-            page = self._doc[pno]
-            rc = page.insert_textbox(box, text, fontsize=size, color=color, rotate=page.rotation,
-                                     **fonts.font_args(family, bold, italic))
-            if rc < 0:
-                raise PdfError(tr("The text does not fit on the page. Choose a smaller size or a higher position."))
-            fonts.fix_space_mapping(self._doc, page)
+            return self._write_runs(self._doc[pno], runs, x, y + first.ascent, width, align, line_height,
+                                    tr("The text does not fit on the page. Choose a smaller size or a "
+                                       "higher position."))
 
     # ---- images & annotations ----------------------------------------------
 
@@ -828,7 +967,8 @@ class PdfDocument:
             annot.set_colors(stroke=color)
             annot.update()
 
-    def add_ink(self, pno: int, strokes: list[list[tuple[float, float]]], color=(0, 0, 0), width: float = 2) -> None:
+    def add_ink(self, pno: int, strokes: list[list[tuple[float, float]]], color=(0, 0, 0), width: float = 2,
+                opacity: float = 1.0) -> None:
         page = self._doc[pno]
         m = page.derotation_matrix
         paths = []
@@ -843,18 +983,20 @@ class PdfDocument:
         with self._edit():
             page = self._doc[pno]
             annot = page.add_ink_annot(paths)
-            annot.set_colors(stroke=color)
-            annot.set_border(width=width)
-            annot.update()
+            self._annot_style(annot, color, width, opacity=opacity)
 
-    def _annot_style(self, annot: pymupdf.Annot, color, width: float | None = None) -> None:
-        annot.set_colors(stroke=color)
+    @staticmethod
+    def _annot_style(annot: pymupdf.Annot, color, width: float | None = None, fill=None, dashed: bool = False,
+                     opacity: float = 1.0) -> None:
+        annot.set_colors(stroke=color, fill=fill if fill is not None else [])
         if width is not None:
-            annot.set_border(width=width)
+            annot.set_border(width=width, dashes=_dashes(width) if dashed else [])
+        annot.set_opacity(opacity)
         annot.update()
 
-    def add_shape(self, pno: int, kind: str, rect: pymupdf.Rect, color=(0, 0, 0), width: float = 2) -> None:
-        """Rectangle (`kind="rect"`) or ellipse (`kind="ellipse"`) outline annotation."""
+    def add_shape(self, pno: int, kind: str, rect: pymupdf.Rect, color=(0, 0, 0), width: float = 2,
+                  fill=None, dashed: bool = False, opacity: float = 1.0) -> None:
+        """Rectangle (`kind="rect"`) or ellipse (`kind="ellipse"`); `fill` None means no fill."""
         rect = pymupdf.Rect(rect)
         if rect.width < 2 or rect.height < 2:
             return
@@ -862,10 +1004,10 @@ class PdfDocument:
             page = self._doc[pno]
             box = rect * page.derotation_matrix
             annot = page.add_rect_annot(box) if kind == "rect" else page.add_circle_annot(box)
-            self._annot_style(annot, color, width)
+            self._annot_style(annot, color, width, fill, dashed, opacity)
 
     def add_line(self, pno: int, start: tuple[float, float], end: tuple[float, float], color=(0, 0, 0),
-                 width: float = 2, arrow: bool = False) -> None:
+                 width: float = 2, arrow: bool = False, dashed: bool = False, opacity: float = 1.0) -> None:
         a, b = pymupdf.Point(start), pymupdf.Point(end)
         if abs(b - a) < 2:
             return
@@ -875,15 +1017,17 @@ class PdfDocument:
             annot = page.add_line_annot(a * m, b * m)
             if arrow:
                 annot.set_line_ends(pymupdf.PDF_ANNOT_LE_NONE, pymupdf.PDF_ANNOT_LE_OPEN_ARROW)
-            self._annot_style(annot, color, width)
+            self._annot_style(annot, color, width, dashed=dashed, opacity=opacity)
 
-    def add_note(self, pno: int, x: float, y: float, text: str, color=(1, 0.85, 0.2)) -> None:
-        """Sticky note: an icon on the page whose text viewers show in a pop-up."""
+    def add_note(self, pno: int, x: float, y: float, text: str, color=(1, 0.85, 0.2), icon: str = "Note") -> None:
+        """Sticky note: an icon (one of `NOTE_ICONS`) whose text viewers show in a pop-up."""
         if not text.strip():
             return
+        if icon not in NOTE_ICONS:
+            raise ValueError(icon)
         with self._edit():
             page = self._doc[pno]
-            annot = page.add_text_annot(pymupdf.Point(x, y) * page.derotation_matrix, text, icon="Note")
+            annot = page.add_text_annot(pymupdf.Point(x, y) * page.derotation_matrix, text, icon=icon)
             annot.set_colors(stroke=color)
             annot.update()
 
@@ -913,20 +1057,22 @@ class PdfDocument:
         text = " ".join(text.split())
         if not text:
             return
-        page = self._doc[pno]
-        rect = pymupdf.Rect(rect)
-        box = rect * page.derotation_matrix
+        with self._edit():
+            self._make_stamp(self._doc[pno], pymupdf.Rect(rect), text, color)
+
+    @staticmethod
+    def _make_stamp(page: pymupdf.Page, rect: pymupdf.Rect, text: str, color) -> pymupdf.Annot:
         # Draw at display size, then render turned to the page's unrotated orientation.
         stamp = _stamp_pdf(text, color, rect.width, rect.height)
         spage = stamp[0]
         spage.set_rotation((-page.rotation) % 360)
         png = spage.get_pixmap(matrix=pymupdf.Matrix(4, 4), alpha=True).tobytes("png")
         stamp.close()
-        with self._edit():
-            page = self._doc[pno]
-            annot = page.add_stamp_annot(box, stamp=png)
-            annot.set_info(content=text)
-            annot.update()
+        annot = page.add_stamp_annot(rect * page.derotation_matrix, stamp=png)
+        annot.set_info(content=text)
+        annot.update()
+        page.parent.xref_set_key(annot.xref, _STAMP_COLOR_KEY, "[%s]" % " ".join(f"{c:.4f}" for c in color))
+        return annot
 
     def _annot_at(self, pno: int, x: float, y: float) -> tuple[str, int] | None:
         """("annot" | "widget", xref) of the topmost removable item under the point."""
@@ -968,6 +1114,249 @@ class PdfDocument:
             else:
                 page.delete_widget(page.load_widget(hit[1]))
         return True
+
+    # ---- objects (select tool) ---------------------------------------------------
+
+    def object_at(self, pno: int, x: float, y: float) -> PageObject | None:
+        """The topmost selectable object under a display point: annotation, form field, image or paragraph."""
+        page = self._doc[pno]
+        to_display = page.rotation_matrix
+        p = pymupdf.Point(x, y) * page.derotation_matrix
+        hit = None
+        for a in page.annots():
+            if a.type[0] in _SKIP_ANNOTS:
+                continue
+            if p in a.rect + (-3, -3, 3, 3):
+                hit = a  # last match = topmost
+        if hit is not None:
+            return self._annot_object(page, hit)
+        for w in page.widgets():
+            if w.field_type != pymupdf.PDF_WIDGET_TYPE_SIGNATURE and p in w.rect:
+                return PageObject(pno, "widget", w.xref, w.field_type_string, w.rect * to_display, True, True)
+        image = self._image_at(page, p)
+        if image is not None:
+            return image
+        block = self.block_at(pno, x, y)
+        if block is not None:
+            return PageObject(pno, "text", -1, "Text", pymupdf.Rect(block.rect), True, True,
+                              stroke=block.color, block=block)
+        return None
+
+    def _annot_object(self, page: pymupdf.Page, a: pymupdf.Annot) -> PageObject:
+        to_display = page.rotation_matrix
+        sub = a.type[1]
+        colors = a.colors or {}
+        border = a.border or {}
+        width = border.get("width", -1)
+        line = None
+        if sub == "Line":
+            v = a.vertices
+            line = (pymupdf.Point(v[0]) * to_display, pymupdf.Point(v[1]) * to_display)
+        opacity = a.opacity if a.opacity is not None and a.opacity >= 0 else 1.0
+        stroke = tuple(colors["stroke"]) if colors.get("stroke") else None
+        if sub == "Stamp":
+            stroke = self._stamp_color(a.xref) or stroke
+        return PageObject(page.number, "annot", a.xref, sub, a.rect * to_display,
+                          movable=sub in _MOVABLE, resizable=sub in _RESIZABLE,
+                          stroke=stroke,
+                          fill=tuple(colors["fill"]) if colors.get("fill") else None,
+                          width=width if width and width > 0 else None, dashed=bool(border.get("dashes")),
+                          opacity=opacity, line=line)
+
+    def _image_at(self, page: pymupdf.Page, p: pymupdf.Point) -> PageObject | None:
+        images = page.get_images(full=True)
+        hit = None
+        for info in page.get_image_info(xrefs=True):
+            xref = info["xref"]
+            if xref > 0 and any(x[0] == xref for x in images) and p in pymupdf.Rect(info["bbox"]):
+                hit = info
+        if hit is None:
+            return None
+        m = pymupdf.Matrix(hit["transform"]) * page.rotation_matrix
+        upright = abs(m.b) < 1e-3 and abs(m.c) < 1e-3 and m.a > 0 and m.d > 0
+        movable = upright and self._image_uses(page, hit["xref"]) == 1
+        return PageObject(page.number, "image", hit["xref"], "Image", pymupdf.Rect(hit["bbox"]) * page.rotation_matrix,
+                          movable, movable)
+
+    @staticmethod
+    def _image_pattern(page: pymupdf.Page, xref: int) -> re.Pattern | None:
+        """Matches the page-level drawing operators of image `xref`, or None if it is drawn inside a form."""
+        entries = [x for x in page.get_images(full=True) if x[0] == xref]
+        if not entries or any(x[9] != 0 for x in entries):
+            return None
+        names = b"|".join(re.escape(x[7].encode()) for x in entries)
+        return re.compile(rb"/(?:" + names + rb")\s+Do\b")
+
+    def _image_uses(self, page: pymupdf.Page, xref: int) -> int:
+        """How often the page draws image `xref` (all resource names for it together)."""
+        pattern = self._image_pattern(page, xref)
+        if pattern is None:
+            return 0
+        content = b"".join(self._doc.xref_stream(x) or b"" for x in page.get_contents())
+        return len(pattern.findall(content))
+
+    def _remove_image_use(self, page: pymupdf.Page, xref: int) -> None:
+        """Stop drawing image `xref` on this page (the image object itself stays for reuse)."""
+        pattern = self._image_pattern(page, xref)
+        if pattern is None or self._image_uses(page, xref) != 1:
+            raise PdfError(tr("This image cannot be moved or removed."))
+        page.clean_contents()
+        (cxref,) = page.get_contents()
+        stream, count = pattern.subn(b"", self._doc.xref_stream(cxref))
+        if count != 1:
+            raise PdfError(tr("This image cannot be moved or removed."))
+        self._doc.update_stream(cxref, stream)
+
+    @staticmethod
+    def _set_annot_rect(annot: pymupdf.Annot, target: pymupdf.Rect) -> None:
+        """Set the outer rect to `target` (unrotated); MuPDF grows it by the border on update."""
+        annot.set_rect(target)
+        annot.update()
+        got = annot.rect
+        grow = (target.x0 - got.x0, target.y0 - got.y0, got.x1 - target.x1, got.y1 - target.y1)
+        if any(abs(g) > 0.01 for g in grow):
+            inner = pymupdf.Rect(target.x0 + grow[0], target.y0 + grow[1], target.x1 - grow[2], target.y1 - grow[3])
+            if inner.width > 1 and inner.height > 1:
+                annot.set_rect(inner)
+                annot.update()
+
+    @staticmethod
+    def _copy_annot_style(src: pymupdf.Annot, dst: pymupdf.Annot) -> None:
+        colors = src.colors or {}
+        dst.set_colors(stroke=colors.get("stroke") or [], fill=colors.get("fill") or [])
+        border = src.border or {}
+        if border.get("width", -1) and border.get("width", -1) > 0:
+            dst.set_border(width=border["width"], dashes=list(border.get("dashes") or []))
+        if src.opacity is not None and src.opacity >= 0:
+            dst.set_opacity(src.opacity)
+        info = src.info
+        dst.set_info(content=info.get("content", ""), title=info.get("title", ""), subject=info.get("subject", ""))
+        if src.type[1] == "Line":
+            dst.set_line_ends(*src.line_ends)
+        dst.update()
+
+    def transform_object(self, obj: PageObject, rect: pymupdf.Rect,
+                         line: tuple[tuple[float, float], tuple[float, float]] | None = None) -> None:
+        """Move/resize an object to display rect `rect` (a line: to the endpoints `line`)."""
+        if not obj.movable:
+            raise PdfError(tr("This object cannot be moved."))
+        rect = pymupdf.Rect(rect)
+        if not obj.resizable:
+            rect = pymupdf.Rect(rect.x0, rect.y0, rect.x0 + obj.rect.width, rect.y0 + obj.rect.height)
+        if rect.width < 2 or rect.height < 2:
+            raise PdfError(tr("The object would be too small."))
+        old = obj.rect
+
+        def remap(pt: pymupdf.Point) -> pymupdf.Point:
+            fx = (pt.x - old.x0) / old.width if old.width else 0
+            fy = (pt.y - old.y0) / old.height if old.height else 0
+            return pymupdf.Point(rect.x0 + fx * rect.width, rect.y0 + fy * rect.height)
+
+        if obj.kind == "text":
+            self._check_no_pending_redactions(obj.page)
+        with self._edit():
+            page = self._doc[obj.page]
+            m, to_display = page.derotation_matrix, page.rotation_matrix
+            if obj.kind == "widget":
+                w = page.load_widget(obj.xref)
+                w.rect = rect * m
+                w.update()
+            elif obj.kind == "image":
+                self._remove_image_use(page, obj.xref)
+                page.insert_image(rect * m, xref=obj.xref, keep_proportion=False, rotate=page.rotation)
+            elif obj.kind == "text":
+                b = obj.block
+                dx, dy = rect.x0 - old.x0, rect.y0 - old.y0
+                width = b.width + (rect.width - old.width)
+                self._erase_text(page, b.line_rects)
+                self._write_runs(page, b.runs, b.left + dx, b.first_baseline + dy, max(width, 4 * b.size), b.align,
+                                 b.line_height, tr("The paragraph does not fit on the page. Shorten the text or "
+                                                   "choose a smaller size."))
+            else:
+                annot = page.load_annot(obj.xref)
+                if obj.subtype == "Line":
+                    a, b = (pymupdf.Point(p) for p in line) if line else (remap(obj.line[0]), remap(obj.line[1]))
+                    new = page.add_line_annot(a * m, b * m)
+                    self._copy_annot_style(annot, new)
+                    page.delete_annot(annot)
+                elif obj.subtype == "Ink":
+                    paths = [[tuple(remap(pymupdf.Point(pt) * to_display) * m) for pt in stroke]
+                             for stroke in annot.vertices]
+                    new = page.add_ink_annot(paths)
+                    self._copy_annot_style(annot, new)
+                    page.delete_annot(annot)
+                else:
+                    self._set_annot_rect(annot, rect * m)
+
+    def style_object(self, obj: PageObject, *, stroke=_UNSET, fill=_UNSET, width: float | None = None,
+                     dashed: bool | None = None, opacity: float | None = None) -> None:
+        """Change colors, line width/style or opacity. `fill=None` removes the fill."""
+        if obj.kind == "text":
+            if stroke is not _UNSET and stroke is not None:
+                runs = [TextRun(r.text, r.style.with_(color=tuple(stroke))) for r in obj.block.runs]
+                self.replace_block(obj.block, runs)
+            return
+        if obj.kind != "annot":
+            return
+        with self._edit():
+            page = self._doc[obj.page]
+            annot = page.load_annot(obj.xref)
+            if obj.subtype == "Stamp":
+                if stroke is not _UNSET and stroke is not None and self._doc.xref_get_key(
+                        obj.xref, _STAMP_COLOR_KEY)[0] != "null":
+                    text = annot.info.get("content", "")
+                    page.delete_annot(annot)
+                    annot = self._make_stamp(page, obj.rect, text, tuple(stroke))
+                if opacity is not None:
+                    annot.set_opacity(opacity)
+                    annot.update()
+                return
+            if stroke is not _UNSET and stroke is not None:
+                annot.set_colors(stroke=stroke)
+            if fill is not _UNSET and obj.subtype in _FILLABLE:
+                annot.set_colors(fill=fill if fill is not None else [])
+            if (width is not None or dashed is not None) and obj.subtype in _BORDERED:
+                w = width if width is not None else (obj.width or 1)
+                d = dashed if dashed is not None else obj.dashed
+                annot.set_border(width=w, dashes=_dashes(w) if d else [])
+            if opacity is not None:
+                annot.set_opacity(opacity)
+            annot.update()
+
+    def delete_object(self, obj: PageObject) -> None:
+        if obj.kind == "text":
+            self.replace_block(obj.block, "")
+            return
+        with self._edit():
+            page = self._doc[obj.page]
+            if obj.kind == "annot":
+                page.delete_annot(page.load_annot(obj.xref))
+            elif obj.kind == "widget":
+                page.delete_widget(page.load_widget(obj.xref))
+            elif obj.kind == "image":
+                if not obj.movable:
+                    raise PdfError(tr("This image cannot be moved or removed."))
+                self._remove_image_use(page, obj.xref)
+
+    def object_text(self, obj: PageObject) -> str:
+        """The editable text of a note or stamp."""
+        return self._doc[obj.page].load_annot(obj.xref).info.get("content", "") if obj.kind == "annot" else ""
+
+    def _stamp_color(self, xref: int) -> tuple[float, float, float] | None:
+        kind, value = self._doc.xref_get_key(xref, _STAMP_COLOR_KEY)
+        return tuple(float(v) for v in value.strip("[]").split()) if kind != "null" else None
+
+    def set_stamp_text(self, obj: PageObject, text: str, color=None) -> None:
+        """Redraw a stamp with new text (and color; default: its current color)."""
+        text = " ".join(text.split())
+        if not text:
+            return
+        with self._edit():
+            page = self._doc[obj.page]
+            annot = page.load_annot(obj.xref)
+            color = tuple(color) if color is not None else (self._stamp_color(obj.xref) or (0.8, 0.1, 0.1))
+            page.delete_annot(annot)
+            self._make_stamp(page, obj.rect, text, color)
 
     # ---- export ----------------------------------------------------------------
 

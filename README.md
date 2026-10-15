@@ -13,8 +13,9 @@ time from **Help › Language**. The app restarts to apply the change.
 |---|---|
 | Viewing | Zoom (Ctrl+wheel), fit to width, page thumbnails, bookmarks (add, rename, delete), printing, drag-and-drop to open |
 | Search | Find text (Ctrl+F) with Turkish-aware case matching (`ikinci` finds `İKİNCİ`) |
-| Text | Edit an existing line or a whole paragraph (re-flowed in its width, same color and style), add new text. Full Unicode support, including Turkish characters |
-| Markup | Highlight, freehand pen, rectangle, ellipse, line, arrow, sticky notes, stamps (any text), insert images, erase annotations |
+| Text | Add text and edit lines or whole paragraphs directly on the page: font, size, bold, italic and color per word; left, centered, right or justified; line spacing and box width. Alignment and mixed styles of existing paragraphs are kept. Full Unicode support, including Turkish characters |
+| Markup | Highlight, freehand pen, rectangle, ellipse, line, arrow (fill, dashed lines, opacity), sticky notes (icon and color), stamps (any text), insert images, erase annotations |
+| Select | Click a shape, stamp, note, image, form field or paragraph to move it (drag or arrow keys), resize it with its handles, change its color, fill, line or opacity, edit it (double-click) or delete it |
 | Redaction | Mark areas (or every search match) and permanently remove the text, images and drawings under them |
 | Pages | Rotate, delete, reorder, crop, insert pages from another PDF, save selected pages as a separate PDF |
 | Page content | Text watermark (angle, opacity, in front or behind), header and footer with page number, page count and date |
@@ -61,9 +62,11 @@ Each has a signature box, a form-style page and a table page.
 
 ## Known limitations
 
-- Text editing rewrites a line or paragraph in its dominant font style; mixed styles (for
-  example one bold word) are not kept. Paragraph editing is left-aligned and may grow down to
-  the bottom margin, overlapping content below it.
+- Edited text is rewritten with Arial, Times New Roman or Courier New (whichever is closest to
+  the original font). A paragraph that becomes longer grows downwards and may overlap the content
+  below it; the app tells you when it does.
+- The Select tool moves and deletes an image only when it is drawn upright and once on the page
+  (not inside a form XObject). Other images can be removed with the Redact tool.
 - Redaction marks are only marks until you apply them. The app offers to apply them when you save.
 - Stamps are stored as images, so stamp text is not searchable.
 - Text on scanned (image) pages cannot be edited because there is no OCR.

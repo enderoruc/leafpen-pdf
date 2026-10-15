@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDia
 
 from .. import APP_NAME
 from ..core import fonts, signing
+from ..core.document import NOTE_ICONS
 from ..core.signing import SignatureInfo, SigningError
 from ..i18n import fmt_datetime, tr
 
@@ -56,89 +57,10 @@ def rgb(color: QColor) -> tuple[float, float, float]:
 
 # ---- text ----------------------------------------------------------------
 
-class TextDialog(QDialog):
-    def __init__(self, parent, color: QColor, size: float = 12, family: str = "sans"):
-        super().__init__(parent)
-        self.setWindowTitle(tr("Add text"))
-        self.text = QPlainTextEdit()
-        self.text.setPlaceholderText(tr("Text to add (can be multiple lines)"))
-        self.family = QComboBox()
-        for key, label in fonts.FAMILY_LABELS.items():
-            self.family.addItem(label, key)
-        self.family.setCurrentIndex(list(fonts.FAMILY_LABELS).index(family))
-        self.size = QDoubleSpinBox()
-        self.size.setRange(4, 96)
-        self.size.setValue(size)
-        self.size.setSuffix(" pt")
-        self.bold = QCheckBox(tr("Bold"))
-        self.color = ColorButton(color)
-
-        row = QHBoxLayout()
-        for w in (self.family, self.size, self.bold, self.color):
-            row.addWidget(w)
-        row.addStretch()
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        lay = QVBoxLayout(self)
-        lay.addWidget(self.text)
-        lay.addLayout(row)
-        lay.addWidget(buttons)
-        self.resize(460, 240)
-
-
-class EditLineDialog(QDialog):
-    def __init__(self, parent, text: str, size: float):
-        super().__init__(parent)
-        self.setWindowTitle(tr("Edit text"))
-        self.text = QLineEdit(text)
-        self.text.selectAll()
-        self.size = QDoubleSpinBox()
-        self.size.setRange(4, 96)
-        self.size.setValue(size)
-        self.size.setSuffix(" pt")
-        hint = QLabel(tr("The line is rewritten in the same position, with the same color and a similar "
-                         "font. Leave it empty to delete the line."))
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: palette(placeholder-text);")
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        form = QFormLayout(self)
-        form.addRow(tr("Text:"), self.text)
-        form.addRow(tr("Size:"), self.size)
-        form.addRow(hint)
-        form.addRow(buttons)
-        self.resize(520, 150)
-
-
-class EditParagraphDialog(QDialog):
-    def __init__(self, parent, text: str, size: float):
-        super().__init__(parent)
-        self.setWindowTitle(tr("Edit paragraph"))
-        self.text = QPlainTextEdit(text)
-        self.text.selectAll()
-        self.size = QDoubleSpinBox()
-        self.size.setRange(4, 96)
-        self.size.setValue(size)
-        self.size.setSuffix(" pt")
-        hint = QLabel(tr("The paragraph is re-flowed within its original width, with the same color and a "
-                         "similar font. Leave it empty to delete the paragraph."))
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: palette(placeholder-text);")
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        form = QFormLayout(self)
-        form.addRow(self.text)
-        form.addRow(tr("Size:"), self.size)
-        form.addRow(hint)
-        form.addRow(buttons)
-        self.resize(560, 320)
-
-
 class NoteDialog(QDialog):
-    def __init__(self, parent, text: str = ""):
+    """Note text; for a new note also its icon and color."""
+
+    def __init__(self, parent, text: str = "", new: bool = False, color: QColor | None = None, icon: str = "Note"):
         super().__init__(parent)
         self.setWindowTitle(tr("Note"))
         self.text = QPlainTextEdit(text)
@@ -149,8 +71,23 @@ class NoteDialog(QDialog):
         buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
         lay.addWidget(self.text)
+        self.icon = QComboBox()
+        self.color = ColorButton(color or QColor(255, 217, 51))
+        if new:
+            labels = {"Note": tr("Note"), "Comment": tr("Comment"), "Help": tr("Help"), "Key": tr("Key"),
+                      "Insert": tr("Insert"), "Paragraph": tr("Paragraph"), "NewParagraph": tr("New paragraph")}
+            for key in NOTE_ICONS:
+                self.icon.addItem(labels[key], key)
+            self.icon.setCurrentIndex(max(0, self.icon.findData(icon)))
+            row = QHBoxLayout()
+            row.addWidget(QLabel(tr("Icon:")))
+            row.addWidget(self.icon)
+            row.addWidget(QLabel(tr("Color:")))
+            row.addWidget(self.color)
+            row.addStretch()
+            lay.addLayout(row)
         lay.addWidget(buttons)
-        self.resize(380, 220)
+        self.resize(380, 240)
 
 
 def stamp_presets() -> list[str]:

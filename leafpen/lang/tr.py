@@ -182,12 +182,6 @@ MESSAGES = {
 
     # --- dialogs ---
     "Choose color": "Renk seç",
-    "Text to add (can be multiple lines)": "Eklenecek metin (birden çok satır olabilir)",
-    "Bold": "Kalın",
-    "The line is rewritten in the same position, with the same color and a similar font. "
-    "Leave it empty to delete the line.":
-        "Satır aynı konumda, aynı renk ve benzer yazı tipiyle yeniden yazılır. "
-        "Boş bırakırsanız satır silinir.",
     "Text:": "Metin:",
     "Size:": "Punto:",
     "New handwritten signature": "Yeni el imzası",
@@ -361,10 +355,6 @@ MESSAGES = {
     "Draw a new form field on the page": "Sayfaya yeni bir form alanı çizin",
 
     # --- dialogs: new tools ---
-    "The paragraph is re-flowed within its original width, with the same color and a similar font. Leave it "
-    "empty to delete the paragraph.":
-        "Paragraf özgün genişliği içinde, aynı renk ve benzer yazı tipiyle yeniden dizilir. Paragrafı silmek "
-        "için boş bırakın.",
     "Note text (leave empty to delete the note)": "Not metni (notu silmek için boş bırakın)",
     "Note text": "Not metni",
     "APPROVED": "ONAYLANDI",
@@ -425,4 +415,76 @@ MESSAGES = {
     "Format:": "Biçim:",
     "Resolution:": "Çözünürlük:",
     "Export…": "Dışa aktar…",
+
+    # --- on-page text editing ---
+    "Font": "Yazı tipi",
+    "Size": "Punto",
+    "Bold (Ctrl+B)": "Kalın (Ctrl+B)",
+    "Italic (Ctrl+I)": "İtalik (Ctrl+I)",
+    "Align left": "Sola hizala",
+    "Center": "Ortala",
+    "Align right": "Sağa hizala",
+    "Justify": "İki yana yasla",
+    "Line spacing": "Satır aralığı",
+    "Apply (Ctrl+Enter)": "Uygula (Ctrl+Enter)",
+    "Cancel (Esc)": "İptal (Esc)",
+    "Drag to change the width": "Genişliği değiştirmek için sürükleyin",
+    "Type the text. Ctrl+Enter or a click outside the box adds it; Esc cancels.":
+        "Metni yazın. Ctrl+Enter ya da kutunun dışına tıklamak ekler; Esc iptal eder.",
+    "Edit the line. Ctrl+Enter or a click outside the box applies it; Esc cancels. Leave it empty to delete "
+    "the line.":
+        "Satırı düzenleyin. Ctrl+Enter ya da kutunun dışına tıklamak uygular; Esc iptal eder. Satırı silmek "
+        "için boş bırakın.",
+    "Edit the paragraph. Ctrl+Enter or a click outside the box applies it; Esc cancels. Drag the blue handle "
+    "to change the width.":
+        "Paragrafı düzenleyin. Ctrl+Enter ya da kutunun dışına tıklamak uygular; Esc iptal eder. Genişliği "
+        "değiştirmek için mavi tutamacı sürükleyin.",
+    "The paragraph now overlaps the text below it. Make it shorter or wider, or undo with Ctrl+Z.":
+        "Paragraf artık alttaki metnin üzerine taşıyor. Kısaltın ya da genişletin veya Ctrl+Z ile geri alın.",
+
+    # --- select tool and properties bar ---
+    "Select: click a shape, stamp, note, image, form field or paragraph to move, resize or restyle it.":
+        "Seç: taşımak, boyutlandırmak ya da biçimini değiştirmek için bir şekle, damgaya, nota, görsele, form "
+        "alanına veya paragrafa tıklayın.",
+    "Properties": "Özellikler",
+    "New items:": "Yeni öğeler:",
+    "Selected {kind}:": "Seçili {kind}:",
+    " Fill ": " Dolgu ",
+    " Line ": " Çizgi ",
+    " Opacity ": " Opaklık ",
+    "Fill color of rectangles and ellipses": "Dikdörtgen ve elipslerin dolgu rengi",
+    "No fill": "Dolgu yok",
+    "Choose fill color…": "Dolgu rengi seç…",
+    "Fill color": "Dolgu rengi",
+    "Solid": "Düz",
+    "Dashed": "Kesikli",
+    "Drag to move, drag the handles to resize. Delete removes it; double-click edits it.":
+        "Taşımak için sürükleyin, boyutlandırmak için tutamaçları sürükleyin. Delete siler; çift tıklama "
+        "düzenler.",
+    "This object cannot be moved here; you can change its color or delete it.":
+        "Bu nesne burada taşınamaz; rengini değiştirebilir ya da silebilirsiniz.",
+    "This object cannot be moved.": "Bu nesne taşınamaz.",
+    "The object would be too small.": "Nesne çok küçük olur.",
+    "This image cannot be moved or removed.": "Bu görsel taşınamaz ya da kaldırılamaz.",
+    "paragraph": "paragraf",
+    "image": "görsel",
+    "form field": "form alanı",
+    "rectangle": "dikdörtgen",
+    "ellipse": "elips",
+    "line": "çizgi",
+    "drawing": "çizim",
+    "stamp": "damga",
+    "note": "not",
+    "text box": "metin kutusu",
+    "highlight": "vurgu",
+    "annotation": "açıklama",
+
+    # --- note icons ---
+    "Icon:": "Simge:",
+    "Comment": "Yorum",
+    "Help": "Yardım",
+    "Key": "Anahtar",
+    "Insert": "Ekleme",
+    "Paragraph": "Paragraf",
+    "New paragraph": "Yeni paragraf",
 }

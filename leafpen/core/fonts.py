@@ -70,6 +70,7 @@ def fix_space_mapping(doc: pymupdf.Document, page: pymupdf.Page) -> None:
     ToUnicode CMap maps such a glyph back to the rarer code point, which breaks
     copy, paste and search in every viewer. Map it to the lowest one instead.
     """
+    changed = False
     for xref, _ext, _type, _base, refname, _enc in page.get_fonts():
         m = _OUR_FONT.match(refname)
         if not m:
@@ -89,6 +90,11 @@ def fix_space_mapping(doc: pymupdf.Document, page: pymupdf.Page) -> None:
         fixed = _BFCHAR.sub(lambda b: _BFCHAR_ENTRY.sub(entry, b.group(0)), cmap)
         if fixed != cmap:
             doc.update_stream(stream_xref, fixed.encode("latin-1"))
+            changed = True
+    if changed:
+        # MuPDF caches loaded fonts with their ToUnicode; drop the cache so text
+        # extraction in this session sees the corrected mapping, not only the saved file.
+        pymupdf.TOOLS.store_shrink(100)
 
 
 def classify(font_name: str, flags: int) -> tuple[str, bool, bool]:

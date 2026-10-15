@@ -260,6 +260,20 @@ def test_paragraph_is_rewritten_in_place(rotation):
     assert "Alttaki ayrı satır" in texts(doc)
 
 
+def test_paragraphs_span_one_block_per_line_pdfs():
+    """Many generators write each line as its own text block; paragraphs must still be found."""
+    from pathlib import Path
+    sample = Path(__file__).resolve().parents[1] / "samples" / "sample-en.pdf"
+    doc = PdfDocument.open(str(sample))
+    blocks = doc.text_blocks(0)
+    body = next(b for b in blocks if b.text.startswith("This document was prepared"))
+    assert len(body.line_rects) == 2 and body.text.endswith("has no legal force.")
+    heading = next(b for b in blocks if b.text == "Clause 1 - Parties")  # bold: not merged into the body
+    assert heading.bold and len(heading.line_rects) == 1
+    parties = next(b for b in blocks if b.text.startswith("The first party"))
+    assert parties.text.endswith("on the following terms.")
+
+
 def test_join_lines_undoes_hyphenation():
     from leafpen.core.document import _join_lines
     assert _join_lines(["Bir keli-", "me ve  ", "", "devamı"]) == "Bir kelime ve devamı"
