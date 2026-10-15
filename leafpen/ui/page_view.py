@@ -24,20 +24,37 @@ class Tool(Enum):
     SIGNATURE = auto()
     ERASE = auto()
     DIGITAL_SIGN = auto()
+    EDIT_PARAGRAPH = auto()
+    RECT = auto()
+    ELLIPSE = auto()
+    LINE = auto()
+    ARROW = auto()
+    NOTE = auto()
+    STAMP = auto()
+    REDACT = auto()
+    CROP = auto()
+    FORM_FIELD = auto()
 
 
-RECT_TOOLS = {Tool.HIGHLIGHT, Tool.IMAGE, Tool.SIGNATURE, Tool.DIGITAL_SIGN}
-CLICK_TOOLS = {Tool.ADD_TEXT, Tool.EDIT_TEXT, Tool.ERASE}
-HOVER_TOOLS = {Tool.EDIT_TEXT, Tool.ERASE}
+RECT_TOOLS = {Tool.HIGHLIGHT, Tool.IMAGE, Tool.SIGNATURE, Tool.DIGITAL_SIGN, Tool.RECT, Tool.ELLIPSE,
+              Tool.STAMP, Tool.REDACT, Tool.CROP, Tool.FORM_FIELD}
+LINE_TOOLS = {Tool.LINE, Tool.ARROW}
+CLICK_TOOLS = {Tool.ADD_TEXT, Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH, Tool.ERASE, Tool.NOTE}
+HOVER_TOOLS = {Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH, Tool.ERASE, Tool.NOTE}
 
 _CURSORS = {
     Tool.BROWSE: Qt.CursorShape.OpenHandCursor,
     Tool.ADD_TEXT: Qt.CursorShape.IBeamCursor,
     Tool.EDIT_TEXT: Qt.CursorShape.IBeamCursor,
+    Tool.EDIT_PARAGRAPH: Qt.CursorShape.IBeamCursor,
     Tool.ERASE: Qt.CursorShape.PointingHandCursor,
+    Tool.NOTE: Qt.CursorShape.PointingHandCursor,
 }
 
 ACCENT = QColor(37, 99, 235)
+REDACT = QColor(220, 38, 38)
+HIT = QColor(250, 204, 21, 110)
+CURRENT_HIT = QColor(249, 115, 22, 150)
 
 
 class PageWidget(QWidget):
@@ -64,15 +81,35 @@ class PageWidget(QWidget):
         p = QPainter(self)
         p.drawImage(self.rect(), self.view.page_image(self.pno))
         z = self.view.zoom
+        hits = self.view.search_hits.get(self.pno)
+        if hits:
+            p.setPen(Qt.PenStyle.NoPen)
+            current = self.view.current_hit
+            for r in hits:
+                p.setBrush(CURRENT_HIT if current is not None and current[0] == self.pno and current[1] == r
+                           else HIT)
+                p.drawRect(QRectF(r.x0 * z - 1, r.y0 * z - 1, r.width * z + 2, r.height * z + 2))
         if self._hover is not None:
             r = self._hover
             p.setPen(QPen(ACCENT, 1.5))
             p.setBrush(QColor(37, 99, 235, 30))
             p.drawRect(QRectF(r.x0 * z - 2, r.y0 * z - 2, r.width * z + 4, r.height * z + 4))
         if self._drag_start is not None and self._drag_now is not None:
-            p.setPen(QPen(ACCENT, 1.5, Qt.PenStyle.DashLine))
-            p.setBrush(QColor(37, 99, 235, 25))
-            p.drawRect(QRectF(self._drag_start, self._drag_now).normalized())
+            tool = self.view.tool
+            if tool in LINE_TOOLS:
+                p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                p.setPen(QPen(self.view.pen_color, max(1.0, self.view.pen_width * z)))
+                p.drawLine(self._drag_start, self._drag_now)
+            else:
+                color = REDACT if tool == Tool.REDACT else ACCENT
+                p.setPen(QPen(color, 1.5, Qt.PenStyle.DashLine))
+                p.setBrush(QColor(color.red(), color.green(), color.blue(), 25))
+                box = QRectF(self._drag_start, self._drag_now).normalized()
+                if tool == Tool.ELLIPSE:
+                    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    p.drawEllipse(box)
+                else:
+                    p.drawRect(box)
         if self._stroke:
             pen = QPen(self.view.pen_color, max(1.0, self.view.pen_width * z))
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -88,7 +125,7 @@ class PageWidget(QWidget):
             return
         tool = self.view.tool
         pos = e.position()
-        if tool in RECT_TOOLS:
+        if tool in RECT_TOOLS or tool in LINE_TOOLS:
             self._drag_start = self._drag_now = pos
         elif tool == Tool.PEN:
             self._stroke = [pos]
@@ -123,10 +160,13 @@ class PageWidget(QWidget):
             return
         if self._drag_start is not None:
             a, b = self._pt(self._drag_start), self._pt(self._drag_now or self._drag_start)
-            rect = pymupdf.Rect(min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
             self._drag_start = self._drag_now = None
             self.update()
-            self.view.rectDrawn.emit(self.pno, rect)
+            if self.view.tool in LINE_TOOLS:
+                self.view.lineDrawn.emit(self.pno, a, b)
+            else:
+                rect = pymupdf.Rect(min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
+                self.view.rectDrawn.emit(self.pno, rect)
         elif self._stroke is not None:
             pts = [self._pt(q) for q in self._stroke]
             self._stroke = None
@@ -146,6 +186,7 @@ class PageView(QScrollArea):
     rectDrawn = Signal(int, object)  # page, pymupdf.Rect
     pointClicked = Signal(int, float, float)
     strokeDrawn = Signal(int, list)
+    lineDrawn = Signal(int, object, object)  # page, (x, y) start, (x, y) end
     currentPageChanged = Signal(int)
     zoomChanged = Signal(float)
 
@@ -160,6 +201,8 @@ class PageView(QScrollArea):
         self.pen_color = QColor(0, 0, 0)
         self.pen_width = 2.0
         self.hover_provider = None  # (tool, page, x, y) -> pymupdf.Rect | None
+        self.search_hits: dict[int, list[pymupdf.Rect]] = {}
+        self.current_hit: tuple[int, pymupdf.Rect] | None = None
         self._cache: OrderedDict[int, QImage] = OrderedDict()
         self._pages: list[PageWidget] = []
         self._current = 0
@@ -243,6 +286,20 @@ class PageView(QScrollArea):
         if 0 <= pno < len(self._pages):
             self._container.adjustSize()
             self.verticalScrollBar().setValue(self._pages[pno].y() - 10)
+
+    def show_rect(self, pno: int, rect: pymupdf.Rect):
+        """Scroll so that `rect` (display coordinates) on page `pno` is visible."""
+        if 0 <= pno < len(self._pages):
+            self._container.adjustSize()
+            w = self._pages[pno]
+            z = self.zoom
+            self.ensureVisible(round(w.x() + rect.x0 * z), round(w.y() + rect.y0 * z), 80, 120)
+
+    def set_search_hits(self, hits: dict[int, list[pymupdf.Rect]], current: tuple[int, pymupdf.Rect] | None):
+        self.search_hits = hits
+        self.current_hit = current
+        for w in self._pages:
+            w.update()
 
     def set_zoom(self, zoom: float):
         zoom = min(max(zoom, self.MIN_ZOOM), self.MAX_ZOOM)

@@ -112,6 +112,263 @@ class EditLineDialog(QDialog):
         self.resize(520, 150)
 
 
+class EditParagraphDialog(QDialog):
+    def __init__(self, parent, text: str, size: float):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Edit paragraph"))
+        self.text = QPlainTextEdit(text)
+        self.text.selectAll()
+        self.size = QDoubleSpinBox()
+        self.size.setRange(4, 96)
+        self.size.setValue(size)
+        self.size.setSuffix(" pt")
+        hint = QLabel(tr("The paragraph is re-flowed within its original width, with the same color and a "
+                         "similar font. Leave it empty to delete the paragraph."))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: palette(placeholder-text);")
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form = QFormLayout(self)
+        form.addRow(self.text)
+        form.addRow(tr("Size:"), self.size)
+        form.addRow(hint)
+        form.addRow(buttons)
+        self.resize(560, 320)
+
+
+class NoteDialog(QDialog):
+    def __init__(self, parent, text: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Note"))
+        self.text = QPlainTextEdit(text)
+        self.text.setPlaceholderText(tr("Note text (leave empty to delete the note)") if text
+                                     else tr("Note text"))
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(self.text)
+        lay.addWidget(buttons)
+        self.resize(380, 220)
+
+
+def stamp_presets() -> list[str]:
+    return [tr("APPROVED"), tr("REJECTED"), tr("DRAFT"), tr("CONFIDENTIAL"), tr("FINAL"), tr("RECEIVED"),
+            tr("PAID"), tr("COPY"), tr("FOR COMMENT"), tr("VOID")]
+
+
+class StampDialog(QDialog):
+    def __init__(self, parent, text: str, color: QColor):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Stamp"))
+        self.text = QComboBox()
+        self.text.setEditable(True)
+        self.text.addItems(stamp_presets())
+        self.text.setCurrentText(text or stamp_presets()[0])
+        self.color = ColorButton(color)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        form = QFormLayout(self)
+        form.addRow(tr("Text:"), self.text)
+        form.addRow(tr("Color:"), self.color)
+        form.addRow(buttons)
+        self.resize(360, 120)
+
+    def _accept(self):
+        if not self.text.currentText().strip():
+            warn(self, tr("Enter the stamp text."))
+            return
+        self.accept()
+
+
+class FormFieldDialog(QDialog):
+    def __init__(self, parent, suggest_name):
+        super().__init__(parent)
+        self.setWindowTitle(tr("New form field"))
+        self._suggest = suggest_name
+        self.kind = QComboBox()
+        for key, label in (("text", tr("Text")), ("multiline", tr("Multi-line text")),
+                           ("checkbox", tr("Checkbox")), ("combobox", tr("Drop-down list")),
+                           ("listbox", tr("List box"))):
+            self.kind.addItem(label, key)
+        self.name = QLineEdit(suggest_name("text"))
+        self._auto_name = self.name.text()
+        self.choices = QPlainTextEdit()
+        self.choices.setPlaceholderText(tr("One option per line"))
+        self.choices_label = QLabel(tr("Options:"))
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form = QFormLayout(self)
+        form.addRow(tr("Type:"), self.kind)
+        form.addRow(tr("Name:"), self.name)
+        form.addRow(self.choices_label, self.choices)
+        form.addRow(buttons)
+        self._kind_changed()
+        self.resize(400, 280)
+
+    def _kind_changed(self):
+        kind = self.kind.currentData()
+        if self.name.text() == self._auto_name:  # the user has not typed a name of their own
+            self._auto_name = self._suggest(kind)
+            self.name.setText(self._auto_name)
+        has_choices = kind in ("combobox", "listbox")
+        self.choices.setVisible(has_choices)
+        self.choices_label.setVisible(has_choices)
+
+    def option_list(self) -> list[str]:
+        return self.choices.toPlainText().splitlines()
+
+
+class PageScope(QComboBox):
+    """All pages / the current page / the pages selected in the thumbnail list."""
+
+    def __init__(self, page_count: int, current: int, selected: list[int]):
+        super().__init__()
+        self.addItem(tr("All pages ({count})", count=page_count), list(range(page_count)))
+        self.addItem(tr("Current page ({number})", number=current + 1), [current])
+        if len(selected) > 1:
+            self.addItem(tr("Selected pages ({count})", count=len(selected)), list(selected))
+
+    def pages(self) -> list[int]:
+        return self.currentData()
+
+
+def _buttons(dialog: QDialog, ok_text: str | None = None) -> QDialogButtonBox:
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    if ok_text:
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    return buttons
+
+
+class WatermarkDialog(QDialog):
+    def __init__(self, parent, scope: PageScope):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Watermark"))
+        self.text = QLineEdit(tr("CONFIDENTIAL"))
+        self.size = QSpinBox()
+        self.size.setRange(8, 200)
+        self.size.setValue(60)
+        self.size.setSuffix(" pt")
+        self.angle = QSpinBox()
+        self.angle.setRange(-90, 90)
+        self.angle.setValue(45)
+        self.angle.setSuffix("°")
+        self.opacity = QSpinBox()
+        self.opacity.setRange(5, 100)
+        self.opacity.setValue(30)
+        self.opacity.setSuffix(" %")
+        self.color = ColorButton(QColor(150, 150, 150))
+        self.behind = QCheckBox(tr("Place behind the page content"))
+        self.scope = scope
+        hint = QLabel(tr("The text is shrunk if it does not fit on a page."))
+        hint.setStyleSheet("color: palette(placeholder-text);")
+        form = QFormLayout(self)
+        form.addRow(tr("Text:"), self.text)
+        form.addRow(tr("Size:"), self.size)
+        form.addRow(tr("Angle:"), self.angle)
+        form.addRow(tr("Opacity:"), self.opacity)
+        form.addRow(tr("Color:"), self.color)
+        form.addRow(tr("Pages:"), self.scope)
+        form.addRow(self.behind)
+        form.addRow(hint)
+        form.addRow(_buttons(self, tr("Add")))
+        self.resize(420, 300)
+
+
+class HeaderFooterDialog(QDialog):
+    def __init__(self, parent, scope: PageScope):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Header and footer"))
+        self.fields: dict[str, QLineEdit] = {}
+        grid = QFormLayout()
+        labels = {"header_left": tr("Header, left:"), "header_center": tr("Header, center:"),
+                  "header_right": tr("Header, right:"), "footer_left": tr("Footer, left:"),
+                  "footer_center": tr("Footer, center:"), "footer_right": tr("Footer, right:")}
+        for slot, label in labels.items():
+            self.fields[slot] = QLineEdit()
+            grid.addRow(label, self.fields[slot])
+        self.fields["footer_center"].setText(tr("Page {page} of {pages}"))
+        self.size = QDoubleSpinBox()
+        self.size.setRange(5, 36)
+        self.size.setValue(9)
+        self.size.setSuffix(" pt")
+        self.margin = QSpinBox()
+        self.margin.setRange(4, 144)
+        self.margin.setValue(24)
+        self.margin.setSuffix(" pt")
+        self.family = QComboBox()
+        for key, label in fonts.FAMILY_LABELS.items():
+            self.family.addItem(label, key)
+        self.color = ColorButton(QColor(0, 0, 0))
+        self.scope = scope
+        hint = QLabel(tr("{page} is replaced with the page number, {pages} with the page count and {date} "
+                         "with today's date."))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: palette(placeholder-text);")
+        grid.addRow(tr("Font:"), self.family)
+        grid.addRow(tr("Size:"), self.size)
+        grid.addRow(tr("Margin:"), self.margin)
+        grid.addRow(tr("Color:"), self.color)
+        grid.addRow(tr("Pages:"), self.scope)
+        grid.addRow(hint)
+        grid.addRow(_buttons(self, tr("Add")))
+        self.setLayout(grid)
+        self.resize(480, 400)
+
+    def texts(self) -> dict[str, str]:
+        return {slot: ed.text() for slot, ed in self.fields.items()}
+
+
+class CompressDialog(QDialog):
+    def __init__(self, parent, has_signatures: bool):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Reduce file size"))
+        self.level = QComboBox()
+        self.level.addItem(tr("High quality (images up to 200 dpi)"), "high")
+        self.level.addItem(tr("Balanced (images up to 150 dpi)"), "medium")
+        self.level.addItem(tr("Smallest file (images up to 96 dpi)"), "low")
+        self.level.setCurrentIndex(1)
+        text = tr("A compressed copy is saved as a new file; the open document is not changed. Images are "
+                  "resampled and re-compressed, fonts are reduced to the characters used, and unused data "
+                  "is removed.")
+        if has_signatures:
+            text += "\n\n" + tr("The digital signatures in this document will not be valid in the compressed "
+                                "copy.")
+        info = QLabel(text)
+        info.setWordWrap(True)
+        form = QFormLayout(self)
+        form.addRow(tr("Quality:"), self.level)
+        form.addRow(info)
+        form.addRow(_buttons(self, tr("Save copy…")))
+        self.resize(460, 200)
+
+
+class ExportImagesDialog(QDialog):
+    def __init__(self, parent, scope: PageScope):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Export pages as images"))
+        self.fmt = QComboBox()
+        self.fmt.addItem("PNG", "png")
+        self.fmt.addItem("JPEG", "jpg")
+        self.dpi = QComboBox()
+        for dpi in (72, 96, 150, 200, 300, 600):
+            self.dpi.addItem(f"{dpi} dpi", dpi)
+        self.dpi.setCurrentIndex(2)
+        self.scope = scope
+        form = QFormLayout(self)
+        form.addRow(tr("Format:"), self.fmt)
+        form.addRow(tr("Resolution:"), self.dpi)
+        form.addRow(tr("Pages:"), self.scope)
+        form.addRow(_buttons(self, tr("Export…")))
+        self.resize(360, 160)
+
+
 # ---- handwritten signature -------------------------------------------------
 
 def crop_to_content(img: QImage, pad: int = 6) -> QImage:

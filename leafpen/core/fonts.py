@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import pymupdf
@@ -43,28 +44,49 @@ def font_args(family: str = "sans", bold: bool = False, italic: bool = False) ->
 
 _OUR_FONT = re.compile(r"^K(sans|serif|mono)([01])([01])$")
 
+_BFCHAR = re.compile(r"beginbfchar(.*?)endbfchar", re.DOTALL)
+_BFCHAR_ENTRY = re.compile(r"<([0-9a-fA-F]{4})>(\s*)<([0-9a-fA-F]{4})>")
+
+
+@lru_cache(maxsize=None)
+def _shared_glyphs(path: str) -> dict[int, int]:
+    """glyph id -> lowest code point, for glyphs that several code points share."""
+    font = pymupdf.Font(fontfile=path)
+    lowest: dict[int, int] = {}
+    count: dict[int, int] = {}
+    for cp in font.valid_codepoints():
+        gid = font.has_glyph(cp)
+        if gid:
+            count[gid] = count.get(gid, 0) + 1
+            lowest.setdefault(gid, cp)  # valid_codepoints() is ascending
+    return {gid: cp for gid, cp in lowest.items() if count[gid] > 1}
+
 
 def fix_space_mapping(doc: pymupdf.Document, page: pymupdf.Page) -> None:
-    """Make our embedded fonts extract spaces as U+0020.
+    """Make our embedded fonts extract characters as they were typed.
 
-    TrueType fonts like Arial share one glyph between U+0020 and U+00A0, and
-    MuPDF's generated ToUnicode CMap maps it back to U+00A0, which breaks copy,
-    paste and search in every viewer.
+    TrueType fonts like Arial share one glyph between several code points
+    (U+0020 and U+00A0, ';' and U+037E, '·' and U+0387). MuPDF's generated
+    ToUnicode CMap maps such a glyph back to the rarer code point, which breaks
+    copy, paste and search in every viewer. Map it to the lowest one instead.
     """
     for xref, _ext, _type, _base, refname, _enc in page.get_fonts():
         m = _OUR_FONT.match(refname)
         if not m:
             continue
         kind, value = doc.xref_get_key(xref, "ToUnicode")
-        if kind != "xref":
-            continue
         path = font_file(m.group(1), m.group(2) == "1", m.group(3) == "1")
-        gid = pymupdf.Font(fontfile=path).has_glyph(32) if path else 0
-        if not gid:
+        if kind != "xref" or path is None:
             continue
+        shared = _shared_glyphs(path)
+
+        def entry(e: re.Match) -> str:
+            cp = shared.get(int(e.group(1), 16))
+            return f"<{e.group(1)}>{e.group(2)}<{cp:04x}>" if cp is not None else e.group(0)
+
         stream_xref = int(value.split()[0])
         cmap = doc.xref_stream(stream_xref).decode("latin-1")
-        fixed = re.sub(rf"<{gid:04x}>\s*<00a0>", f"<{gid:04x}> <0020>", cmap, flags=re.IGNORECASE)
+        fixed = _BFCHAR.sub(lambda b: _BFCHAR_ENTRY.sub(entry, b.group(0)), cmap)
         if fixed != cmap:
             doc.update_stream(stream_xref, fixed.encode("latin-1"))
 

@@ -72,8 +72,8 @@ MESSAGES = {
         "Görsel: görselin yerleşeceği alanı çizin ya da tıklayın.",
     "Signature: draw or click where the signature should go.":
         "El imzası: imzanın yerleşeceği alanı çizin ya da tıklayın.",
-    "Erase: click the highlight, drawing or note to remove.":
-        "Sil: kaldırmak istediğiniz vurgu, çizim veya nota tıklayın.",
+    "Erase: click an annotation, stamp, note or form field to remove it.":
+        "Sil: kaldırmak istediğiniz açıklamaya, damgaya, nota ya da form alanına tıklayın.",
     "Digital signature: draw or click where the signature should appear (Esc: cancel).":
         "Dijital imza: imzanın görüneceği alanı çizin ya da tıklayın (Esc: iptal).",
     "Verify signatures": "İmzaları doğrula",
@@ -256,4 +256,173 @@ MESSAGES = {
     "An offline, free PDF editor and signer. No data ever leaves your computer.":
         "Çevrimdışı ve ücretsiz PDF düzenleyici ve imzalayıcı. Hiçbir veri bilgisayarınızdan çıkmaz.",
     "Open-source components used:": "Kullanılan açık kaynak bileşenler:",
+
+    # --- core: search, redaction, bookmarks, layout, forms ---
+    "A bookmark needs a title.": "Yer iminin bir başlığı olmalı.",
+    "The crop area is too small.": "Kırpma alanı çok küçük.",
+    "The crop area lies outside page {number}.": "Kırpma alanı {number}. sayfanın dışında kalıyor.",
+    "Enter the watermark text.": "Filigran metnini girin.",
+    "Enter at least one header or footer text.": "En az bir üstbilgi ya da altbilgi metni girin.",
+    "The header or footer text does not fit on page {number}.":
+        "Üstbilgi ya da altbilgi metni {number}. sayfaya sığmıyor.",
+    "The paragraph does not fit on the page. Shorten the text or choose a smaller size.":
+        "Paragraf sayfaya sığmıyor. Metni kısaltın ya da daha küçük punto seçin.",
+    "The field needs a name.": "Alanın bir adı olmalı.",
+    "Field names cannot contain a dot.": "Alan adları nokta içeremez.",
+    "A field named \"{name}\" already exists.": "\"{name}\" adlı bir alan zaten var.",
+    "Enter at least one option for the list.": "Liste için en az bir seçenek girin.",
+    "The field area is too small.": "Alan çok küçük.",
+
+    # --- main window: new tools and menus ---
+    "Edit paragraph: click the paragraph you want to change.":
+        "Paragraf düzenle: değiştirmek istediğiniz paragrafa tıklayın.",
+    "Rectangle: drag to draw.": "Dikdörtgen: sürükleyerek çizin.",
+    "Ellipse: drag to draw.": "Elips: sürükleyerek çizin.",
+    "Line: drag from start to end.": "Çizgi: başlangıçtan bitişe sürükleyin.",
+    "Arrow: drag from the tail to the tip.": "Ok: kuyruktan uca doğru sürükleyin.",
+    "Note: click to add a sticky note, or click a note to edit it.":
+        "Not: yapışkan not eklemek için tıklayın ya da düzenlemek için bir nota tıklayın.",
+    "Stamp: draw or click where the stamp should go.": "Damga: damganın yerleşeceği alanı çizin ya da tıklayın.",
+    "Redact: drag over the content to remove. Apply the marks with Document › Apply redactions.":
+        "Karart: kaldırılacak içeriğin üzerine sürükleyin. İşaretleri Belge › Karartmaları uygula ile uygulayın.",
+    "Crop: drag the area to keep (applies to the selected pages).":
+        "Kırp: korunacak alanı sürükleyerek çizin (seçili sayfalara uygulanır).",
+    "Form field: draw or click where the field should go.": "Form alanı: alanın yerleşeceği yeri çizin ya da tıklayın.",
+    "Bookmarks": "Yer imleri",
+    "Find…": "Bul…",
+    "Export pages as images…": "Sayfaları görsel olarak dışa aktar…",
+    "Reduce file size…": "Dosya boyutunu küçült…",
+    "Apply redactions…": "Karartmaları uygula…",
+    "Add watermark…": "Filigran ekle…",
+    "Add header and footer…": "Üstbilgi ve altbilgi ekle…",
+    "Remove crop (selected pages)": "Kırpmayı kaldır (seçili sayfalar)",
+    "Edit line": "Satır düzenle",
+    "Edit paragraph": "Paragraf düzenle",
+    "Rectangle": "Dikdörtgen",
+    "Ellipse": "Elips",
+    "Line": "Çizgi",
+    "Arrow": "Ok",
+    "Note": "Not",
+    "Stamp": "Damga",
+    "Redact": "Karart",
+    "Crop pages": "Sayfaları kırp",
+    "Add form field": "Form alanı ekle",
+    "&Comment": "&Yorum",
+    "&Document": "&Belge",
+    "Shapes": "Şekiller",
+    "{count} area(s) are marked for redaction but not applied yet. The marked content is still in the file "
+    "and can be read by anyone.\n\nApply the redactions before saving?":
+        "{count} alan karartma için işaretlendi ama henüz uygulanmadı. İşaretli içerik hâlâ dosyanın içinde ve "
+        "herkes tarafından okunabilir.\n\nKaydetmeden önce karartmalar uygulansın mı?",
+    "{count} match(es) marked for redaction. Apply them with Document › Apply redactions.":
+        "{count} eşleşme karartma için işaretlendi. Belge › Karartmaları uygula ile uygulayın.",
+    "Add bookmark": "Yer imi ekle",
+    "Bookmark title:": "Yer imi başlığı:",
+    "Page {number}": "Sayfa {number}",
+    "Rename bookmark": "Yer imini yeniden adlandır",
+    "Delete the bookmark \"{title}\" and the bookmarks under it?":
+        "\"{title}\" yer imi ve altındaki yer imleri silinsin mi?",
+    "There are no redaction marks. Mark areas with the Redact tool or with Find › Mark all for redaction first.":
+        "Karartma işareti yok. Önce Karart aracıyla ya da Bul › Tümünü karartma için işaretle ile alan işaretleyin.",
+    "Permanently remove the text, images and drawings under {count} redaction mark(s)? The areas are filled "
+    "with black. Once the file is saved this cannot be undone.":
+        "{count} karartma işaretinin altındaki metin, görsel ve çizimler kalıcı olarak kaldırılsın mı? Alanlar "
+        "siyahla doldurulur. Dosya kaydedildikten sonra bu işlem geri alınamaz.",
+    "Redactions applied. Save the document to keep the result.":
+        "Karartmalar uygulandı. Sonucu korumak için belgeyi kaydedin.",
+    "Save compressed copy": "Sıkıştırılmış kopyayı kaydet",
+    "{base}_compressed.pdf": "{base}_sikistirilmis.pdf",
+    "Choose a different file name; the compressed copy cannot replace the open document.":
+        "Farklı bir dosya adı seçin; sıkıştırılmış kopya açık belgenin yerine kaydedilemez.",
+    "Compressed copy saved:\n{path}\n\n{before} → {after} ({percent}% smaller)":
+        "Sıkıştırılmış kopya kaydedildi:\n{path}\n\n{before} → {after} (%{percent} daha küçük)",
+    "Compressed copy saved:\n{path}\n\nSize: {after}": "Sıkıştırılmış kopya kaydedildi:\n{path}\n\nBoyut: {after}",
+    "PNG images (*.png)": "PNG görselleri (*.png)",
+    "JPEG images (*.jpg)": "JPEG görselleri (*.jpg)",
+    "Export pages as images": "Sayfaları görsel olarak dışa aktar",
+    "{count} image(s) saved, e.g. {path}": "{count} görsel kaydedildi, ör. {path}",
+
+    # --- panels: bookmarks, find, forms ---
+    "Add": "Ekle",
+    "Add a bookmark to the current page": "Geçerli sayfaya yer imi ekle",
+    "Rename": "Yeniden adlandır",
+    "No bookmarks. Use Add to bookmark the current page.":
+        "Yer imi yok. Geçerli sayfayı yer imlerine eklemek için Ekle'yi kullanın.",
+    "Find in document": "Belgede bul",
+    "Previous (Shift+Enter)": "Önceki (Shift+Enter)",
+    "Next (Enter)": "Sonraki (Enter)",
+    "Mark all for redaction": "Tümünü karartma için işaretle",
+    "Mark every match for redaction. Nothing is removed until you apply the redactions.":
+        "Tüm eşleşmeleri karartma için işaretler. Karartmaları uygulayana kadar hiçbir şey kaldırılmaz.",
+    "Close (Esc)": "Kapat (Esc)",
+    "No matches": "Eşleşme yok",
+    "{current} of {total}": "{current} / {total}",
+    "Add field…": "Alan ekle…",
+    "Draw a new form field on the page": "Sayfaya yeni bir form alanı çizin",
+
+    # --- dialogs: new tools ---
+    "The paragraph is re-flowed within its original width, with the same color and a similar font. Leave it "
+    "empty to delete the paragraph.":
+        "Paragraf özgün genişliği içinde, aynı renk ve benzer yazı tipiyle yeniden dizilir. Paragrafı silmek "
+        "için boş bırakın.",
+    "Note text (leave empty to delete the note)": "Not metni (notu silmek için boş bırakın)",
+    "Note text": "Not metni",
+    "APPROVED": "ONAYLANDI",
+    "REJECTED": "REDDEDİLDİ",
+    "DRAFT": "TASLAK",
+    "CONFIDENTIAL": "GİZLİ",
+    "FINAL": "NİHAİ",
+    "RECEIVED": "TESLİM ALINDI",
+    "PAID": "ÖDENDİ",
+    "COPY": "KOPYA",
+    "FOR COMMENT": "GÖRÜŞE",
+    "VOID": "İPTAL",
+    "Color:": "Renk:",
+    "Enter the stamp text.": "Damga metnini girin.",
+    "New form field": "Yeni form alanı",
+    "Text": "Metin",
+    "Multi-line text": "Çok satırlı metin",
+    "Checkbox": "Onay kutusu",
+    "Drop-down list": "Açılır liste",
+    "List box": "Liste kutusu",
+    "One option per line": "Her satıra bir seçenek",
+    "Options:": "Seçenekler:",
+    "Type:": "Tür:",
+    "Name:": "Ad:",
+    "All pages ({count})": "Tüm sayfalar ({count})",
+    "Current page ({number})": "Geçerli sayfa ({number})",
+    "Selected pages ({count})": "Seçili sayfalar ({count})",
+    "Watermark": "Filigran",
+    "Angle:": "Açı:",
+    "Opacity:": "Opaklık:",
+    "Place behind the page content": "Sayfa içeriğinin arkasına yerleştir",
+    "The text is shrunk if it does not fit on a page.": "Metin sayfaya sığmazsa küçültülür.",
+    "Pages:": "Sayfalar:",
+    "Header and footer": "Üstbilgi ve altbilgi",
+    "Header, left:": "Üstbilgi, sol:",
+    "Header, center:": "Üstbilgi, orta:",
+    "Header, right:": "Üstbilgi, sağ:",
+    "Footer, left:": "Altbilgi, sol:",
+    "Footer, center:": "Altbilgi, orta:",
+    "Footer, right:": "Altbilgi, sağ:",
+    "Page {page} of {pages}": "Sayfa {page} / {pages}",
+    "{page} is replaced with the page number, {pages} with the page count and {date} with today's date.":
+        "{page} sayfa numarasıyla, {pages} sayfa sayısıyla, {date} bugünün tarihiyle değiştirilir.",
+    "Margin:": "Kenar boşluğu:",
+    "Reduce file size": "Dosya boyutunu küçült",
+    "High quality (images up to 200 dpi)": "Yüksek kalite (görseller en fazla 200 dpi)",
+    "Balanced (images up to 150 dpi)": "Dengeli (görseller en fazla 150 dpi)",
+    "Smallest file (images up to 96 dpi)": "En küçük dosya (görseller en fazla 96 dpi)",
+    "A compressed copy is saved as a new file; the open document is not changed. Images are resampled and "
+    "re-compressed, fonts are reduced to the characters used, and unused data is removed.":
+        "Sıkıştırılmış kopya yeni bir dosya olarak kaydedilir; açık belge değişmez. Görseller yeniden "
+        "örneklenip sıkıştırılır, yazı tipleri kullanılan karakterlere indirgenir ve kullanılmayan veriler "
+        "kaldırılır.",
+    "The digital signatures in this document will not be valid in the compressed copy.":
+        "Bu belgedeki dijital imzalar sıkıştırılmış kopyada geçerli olmayacak.",
+    "Quality:": "Kalite:",
+    "Save copy…": "Kopyayı kaydet…",
+    "Format:": "Biçim:",
+    "Resolution:": "Çözünürlük:",
+    "Export…": "Dışa aktar…",
 }

@@ -11,11 +11,15 @@ time from **Help › Language**. The app restarts to apply the change.
 
 | Area | What you can do |
 |---|---|
-| Viewing | Zoom (Ctrl+wheel), fit to width, page thumbnails, printing, drag-and-drop to open |
-| Text | Edit an existing line (same position, color and style), add new text. Full Unicode support, including Turkish characters |
-| Markup | Highlight, freehand pen, insert images, erase annotations |
-| Pages | Rotate, delete, reorder, insert pages from another PDF, save selected pages as a separate PDF |
-| Forms | Fill in text fields, checkboxes, radio buttons and drop-downs |
+| Viewing | Zoom (Ctrl+wheel), fit to width, page thumbnails, bookmarks (add, rename, delete), printing, drag-and-drop to open |
+| Search | Find text (Ctrl+F) with Turkish-aware case matching (`ikinci` finds `İKİNCİ`) |
+| Text | Edit an existing line or a whole paragraph (re-flowed in its width, same color and style), add new text. Full Unicode support, including Turkish characters |
+| Markup | Highlight, freehand pen, rectangle, ellipse, line, arrow, sticky notes, stamps (any text), insert images, erase annotations |
+| Redaction | Mark areas (or every search match) and permanently remove the text, images and drawings under them |
+| Pages | Rotate, delete, reorder, crop, insert pages from another PDF, save selected pages as a separate PDF |
+| Page content | Text watermark (angle, opacity, in front or behind), header and footer with page number, page count and date |
+| Forms | Create text, multi-line, checkbox, drop-down and list fields; fill in text fields, checkboxes, radio buttons and drop-downs |
+| Export | Pages as PNG/JPEG images; a compressed copy with smaller images and subset fonts |
 | Handwritten signature | Draw, type or import a scanned signature and place it on a page |
 | Digital signature | PAdES signing with a .p12/.pfx certificate (visible or invisible), self-signed identity creation, signature verification |
 | Security | Open, edit and sign password-protected PDFs; the password is preserved when saving |
@@ -57,8 +61,11 @@ Each has a signature box, a form-style page and a table page.
 
 ## Known limitations
 
-- Text editing works line by line. If a line mixes several font styles, it is rewritten in the
-  dominant one.
+- Text editing rewrites a line or paragraph in its dominant font style; mixed styles (for
+  example one bold word) are not kept. Paragraph editing is left-aligned and may grow down to
+  the bottom margin, overlapping content below it.
+- Redaction marks are only marks until you apply them. The app offers to apply them when you save.
+- Stamps are stored as images, so stamp text is not searchable.
 - Text on scanned (image) pages cannot be edited because there is no OCR.
 - Editing a digitally signed document and saving it makes the existing signatures appear
   invalid. The app warns you before saving.

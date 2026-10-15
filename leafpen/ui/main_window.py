@@ -11,22 +11,25 @@ from PySide6.QtGui import (QAction, QActionGroup, QColor, QIcon, QImage, QKeySeq
                            QPixmap, QPolygonF)
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
-                               QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QStyle,
+                               QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle,
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_ID, APP_NAME, ORG_NAME
 from ..core import signing
-from ..core.document import PasswordRequired, PdfDocument, PdfError, write_file
+from ..core.document import PasswordRequired, PdfDocument, PdfError, SearchHit, write_file
 from ..core.signing import SigningError
 from ..i18n import LANGUAGES, tr
 from . import dialogs
 from .page_view import PageView, Tool
-from .panels import FormPanel, ThumbnailList
-
+from .panels import BookmarkPanel, FindBar, FormPanel, ThumbnailList
 
 
 def _pdf_filter() -> str:
     return tr("PDF documents (*.pdf)")
+
+
+def _megabytes(n: int) -> str:
+    return f"{n / 1_048_576:.2f} MB"
 
 
 def _tool_hint(tool: Tool) -> str:
@@ -38,8 +41,19 @@ def _tool_hint(tool: Tool) -> str:
         Tool.PEN: tr("Pen: draw freely."),
         Tool.IMAGE: tr("Image: draw or click where the image should go."),
         Tool.SIGNATURE: tr("Signature: draw or click where the signature should go."),
-        Tool.ERASE: tr("Erase: click the highlight, drawing or note to remove."),
+        Tool.ERASE: tr("Erase: click an annotation, stamp, note or form field to remove it."),
         Tool.DIGITAL_SIGN: tr("Digital signature: draw or click where the signature should appear (Esc: cancel)."),
+        Tool.EDIT_PARAGRAPH: tr("Edit paragraph: click the paragraph you want to change."),
+        Tool.RECT: tr("Rectangle: drag to draw."),
+        Tool.ELLIPSE: tr("Ellipse: drag to draw."),
+        Tool.LINE: tr("Line: drag from start to end."),
+        Tool.ARROW: tr("Arrow: drag from the tail to the tip."),
+        Tool.NOTE: tr("Note: click to add a sticky note, or click a note to edit it."),
+        Tool.STAMP: tr("Stamp: draw or click where the stamp should go."),
+        Tool.REDACT: tr("Redact: drag over the content to remove. Apply the marks with Document › Apply "
+                        "redactions."),
+        Tool.CROP: tr("Crop: drag the area to keep (applies to the selected pages)."),
+        Tool.FORM_FIELD: tr("Form field: draw or click where the field should go."),
     }[tool]
 
 
@@ -76,13 +90,16 @@ class MainWindow(QMainWindow):
         self.settings = QSettings(ORG_NAME, APP_ID)
         self._restarting = False
         self._pending_sign: dialogs.SignRequest | None = None
-        self._lines_cache: dict[int, tuple[int, list]] = {}
+        self._text_cache: dict[tuple[str, int], tuple[int, list]] = {}
+        self._hits: list[SearchHit] = []
+        self._hit_index: int | None = None
 
         self.view = PageView()
         self.view.hover_provider = self._hover_rect
         self.view.rectDrawn.connect(self._on_rect)
         self.view.pointClicked.connect(self._on_click)
         self.view.strokeDrawn.connect(self._on_stroke)
+        self.view.lineDrawn.connect(self._on_line)
         self.view.currentPageChanged.connect(self._on_page_changed)
         self.view.zoomChanged.connect(lambda _z: self._update_status())
         self.view.pen_color = QColor(self.settings.value("pen_color", "#1d4ed8"))
@@ -109,16 +126,26 @@ class MainWindow(QMainWindow):
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setStyleSheet("color: gray; font-size: 15px;")
 
+        self.find_bar = FindBar()
+        self.find_bar.searchRequested.connect(self._search)
+        self.find_bar.nextRequested.connect(lambda: self._step_hit(1))
+        self.find_bar.previousRequested.connect(lambda: self._step_hit(-1))
+        self.find_bar.redactAllRequested.connect(self._redact_hits)
+        self.find_bar.closed.connect(self._clear_search)
+        self.find_bar.hide()
+
         central = QWidget()
         lay = QVBoxLayout(central)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self.sig_bar)
+        lay.addWidget(self.find_bar)
         lay.addWidget(self.view, 1)
         lay.addWidget(self.empty, 1)
         self.setCentralWidget(central)
 
         self._build_pages_dock()
+        self._build_bookmarks_dock()
         self._build_forms_dock()
         self._build_actions()
         self._build_menus_and_toolbars()
@@ -168,10 +195,26 @@ class MainWindow(QMainWindow):
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
         dock.setWidget(host)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        self.pages_dock = dock
+
+    def _build_bookmarks_dock(self):
+        self.bookmark_panel = BookmarkPanel()
+        self.bookmark_panel.pageActivated.connect(self.view.go_to)
+        self.bookmark_panel.addRequested.connect(self._add_bookmark)
+        self.bookmark_panel.renameRequested.connect(self._rename_bookmark)
+        self.bookmark_panel.deleteRequested.connect(self._delete_bookmark)
+        self.bookmarks_dock = QDockWidget(tr("Bookmarks"), self)
+        self.bookmarks_dock.setObjectName("bookmarksDock")
+        self.bookmarks_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.bookmarks_dock.setWidget(self.bookmark_panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.bookmarks_dock)
+        self.tabifyDockWidget(self.pages_dock, self.bookmarks_dock)
+        self.pages_dock.raise_()
 
     def _build_forms_dock(self):
         self.form_panel = FormPanel()
         self.form_panel.applyRequested.connect(self._apply_form)
+        self.form_panel.addFieldRequested.connect(lambda: self._set_tool(Tool.FORM_FIELD))
         self.forms_dock = QDockWidget(tr("Form fields"), self)
         self.forms_dock.setObjectName("formsDock")
         self.forms_dock.setWidget(self.form_panel)
@@ -214,18 +257,37 @@ class MainWindow(QMainWindow):
         self.act_about = self._action(tr("About"), lambda: QMessageBox.about(self, APP_NAME, dialogs.about_html()))
         self.act_forms = self.forms_dock.toggleViewAction()
         self.act_forms.setText(tr("Form fields"))
+        self.act_bookmarks = self.bookmarks_dock.toggleViewAction()
+        self.act_bookmarks.setText(tr("Bookmarks"))
+        self.act_find = self._action(tr("Find…"), self.find, QKeySequence.StandardKey.Find)
+        self.act_export_images = self._action(tr("Export pages as images…"), self.export_images)
+        self.act_compress = self._action(tr("Reduce file size…"), self.compress)
+        self.act_apply_redactions = self._action(tr("Apply redactions…"), self.apply_redactions)
+        self.act_watermark = self._action(tr("Add watermark…"), self.add_watermark)
+        self.act_header_footer = self._action(tr("Add header and footer…"), self.add_header_footer)
+        self.act_reset_crop = self._action(tr("Remove crop (selected pages)"), self.reset_crop)
 
         self.tool_group = QActionGroup(self)
         self.tool_actions: dict[Tool, QAction] = {}
         for tool, text, key in (
             (Tool.BROWSE, tr("Browse"), "Esc"),
             (Tool.ADD_TEXT, tr("Add text"), "T"),
-            (Tool.EDIT_TEXT, tr("Edit text"), "E"),
+            (Tool.EDIT_TEXT, tr("Edit line"), "E"),
+            (Tool.EDIT_PARAGRAPH, tr("Edit paragraph"), "Shift+E"),
             (Tool.HIGHLIGHT, tr("Highlight"), "H"),
             (Tool.PEN, tr("Pen"), "P"),
+            (Tool.RECT, tr("Rectangle"), "R"),
+            (Tool.ELLIPSE, tr("Ellipse"), "O"),
+            (Tool.LINE, tr("Line"), "L"),
+            (Tool.ARROW, tr("Arrow"), "A"),
+            (Tool.NOTE, tr("Note"), "N"),
+            (Tool.STAMP, tr("Stamp"), "M"),
             (Tool.IMAGE, tr("Image"), "I"),
             (Tool.SIGNATURE, tr("Signature"), "S"),
+            (Tool.REDACT, tr("Redact"), "D"),
             (Tool.ERASE, tr("Erase"), "X"),
+            (Tool.CROP, tr("Crop pages"), "C"),
+            (Tool.FORM_FIELD, tr("Add form field"), "F"),
         ):
             a = QAction(text, self)
             a.setCheckable(True)
@@ -237,14 +299,33 @@ class MainWindow(QMainWindow):
 
         self.doc_actions = [self.act_save, self.act_save_as, self.act_insert, self.act_extract, self.act_print,
                             self.act_zoom_in, self.act_zoom_out, self.act_fit, self.act_actual,
-                            self.act_digital, self.act_verify, *self.tool_actions.values()]
+                            self.act_digital, self.act_verify, self.act_find, self.act_export_images,
+                            self.act_compress, self.act_apply_redactions, self.act_watermark,
+                            self.act_header_footer, self.act_reset_crop, *self.tool_actions.values()]
+
+    def _tool_menu_button(self, text: str, tools: list[Tool]) -> QToolButton:
+        """A toolbar button that shows the last tool chosen from its menu."""
+        button = QToolButton()
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        menu = QMenu(text, button)
+        for tool in tools:
+            menu.addAction(self.tool_actions[tool])
+            self.tool_actions[tool].triggered.connect(
+                lambda _c=False, a=self.tool_actions[tool]: button.setDefaultAction(a))
+        button.setMenu(menu)
+        button.setDefaultAction(self.tool_actions[tools[0]])
+        return button
 
     def _build_menus_and_toolbars(self):
+        T = self.tool_actions
         mb = self.menuBar()
         m = mb.addMenu(tr("&File"))
         m.addActions([self.act_open, self.act_save, self.act_save_as])
         m.addSeparator()
         m.addActions([self.act_insert, self.act_extract])
+        m.addSeparator()
+        m.addActions([self.act_export_images, self.act_compress])
         m.addSeparator()
         m.addAction(self.act_print)
         m.addSeparator()
@@ -252,11 +333,25 @@ class MainWindow(QMainWindow):
         m = mb.addMenu(tr("E&dit"))
         m.addActions([self.act_undo, self.act_redo])
         m.addSeparator()
-        m.addActions(list(self.tool_actions.values()))
+        m.addAction(self.act_find)
+        m.addSeparator()
+        m.addActions([T[t] for t in (Tool.BROWSE, Tool.ADD_TEXT, Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH,
+                                     Tool.IMAGE, Tool.ERASE)])
+        m = mb.addMenu(tr("&Comment"))
+        m.addActions([T[t] for t in (Tool.HIGHLIGHT, Tool.PEN, Tool.RECT, Tool.ELLIPSE, Tool.LINE, Tool.ARROW,
+                                     Tool.NOTE, Tool.STAMP)])
+        m = mb.addMenu(tr("&Document"))
+        m.addActions([T[Tool.CROP], self.act_reset_crop])
+        m.addSeparator()
+        m.addActions([self.act_watermark, self.act_header_footer])
+        m.addSeparator()
+        m.addActions([T[Tool.REDACT], self.act_apply_redactions])
+        m.addSeparator()
+        m.addAction(T[Tool.FORM_FIELD])
         m = mb.addMenu(tr("&View"))
         m.addActions([self.act_zoom_in, self.act_zoom_out, self.act_fit, self.act_actual])
         m.addSeparator()
-        m.addAction(self.act_forms)
+        m.addActions([self.act_bookmarks, self.act_forms])
         m = mb.addMenu(tr("&Signatures"))
         m.addActions([self.act_signatures, self.tool_actions[Tool.SIGNATURE]])
         m.addSeparator()
@@ -286,12 +381,18 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         tb.addActions([self.act_zoom_out, self.act_fit, self.act_zoom_in])
         self.addToolBar(tb)
+        self.addToolBarBreak()  # the tools no longer fit next to the file toolbar
 
         tools = QToolBar(tr("Tools"))
         tools.setObjectName("toolsToolbar")
         tools.setMovable(False)
         tools.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        tools.addActions(list(self.tool_actions.values()))
+        tools.addActions([T[Tool.BROWSE], T[Tool.ADD_TEXT]])
+        tools.addWidget(self._tool_menu_button(tr("Edit text"), [Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH]))
+        tools.addActions([T[Tool.HIGHLIGHT], T[Tool.PEN]])
+        tools.addWidget(self._tool_menu_button(tr("Shapes"), [Tool.RECT, Tool.ELLIPSE, Tool.LINE, Tool.ARROW]))
+        tools.addActions([T[t] for t in (Tool.NOTE, Tool.STAMP, Tool.IMAGE, Tool.SIGNATURE, Tool.REDACT,
+                                         Tool.ERASE)])
         tools.addSeparator()
         tools.addWidget(QLabel(tr(" Color ")))
         self.color_btn = dialogs.ColorButton(self.view.pen_color)
@@ -346,11 +447,14 @@ class MainWindow(QMainWindow):
 
     def _changed(self, pages: list[int] | None = None):
         """Call after the document was modified."""
-        self._lines_cache.clear()
+        self._text_cache.clear()
         self.view.reload()
         self.thumbs.refresh(pages)
         if self.forms_dock.isVisible() or pages is None:
             self._load_form_fields()
+        self._load_bookmarks()
+        if self.find_bar.isVisible():
+            self._search(self.find_bar.edit.text(), keep_position=True)
         self._refresh_ui()
 
     def _run(self, fn, pages: list[int] | None = None) -> bool:
@@ -437,12 +541,16 @@ class MainWindow(QMainWindow):
             self.doc.close()
         self.doc = doc
         self.settings.setValue("last_dir", os.path.dirname(doc.path))
-        self._lines_cache.clear()
+        self._text_cache.clear()
+        self._clear_search()
+        self.find_bar.hide()
         self.view.set_document(doc)
         self.thumbs.set_document(doc)
         self._set_tool(Tool.BROWSE)
         self.view.fit_width()
         self._load_form_fields(show_if_any=True)
+        self._load_bookmarks()
+        (self.bookmarks_dock if doc.bookmarks() else self.pages_dock).raise_()
         self._update_signature_bar()
         self._refresh_ui()
         return True
@@ -466,19 +574,34 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
 
+    def _confirm_pending_redactions(self) -> bool:
+        """Marked-but-unapplied redactions still contain the content; offer to apply them."""
+        count = self.doc.redaction_count()
+        if not count:
+            return True
+        r = QMessageBox.warning(
+            self, APP_NAME,
+            tr("{count} area(s) are marked for redaction but not applied yet. The marked content is still in "
+               "the file and can be read by anyone.\n\nApply the redactions before saving?", count=count),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes)
+        if r == QMessageBox.StandardButton.Yes:
+            return self._run(self.doc.apply_redactions)
+        return r == QMessageBox.StandardButton.No
+
     def save(self) -> bool:
         if not self.doc:
             return False
         if not self.doc.path:
             return self.save_as()
-        if not self._confirm_breaking_signatures():
+        if not self._confirm_pending_redactions() or not self._confirm_breaking_signatures():
             return False
         return self._save_to(self.doc.path)
 
     def save_as(self) -> bool:
         if not self.doc:
             return False
-        if not self._confirm_breaking_signatures():
+        if not self._confirm_pending_redactions() or not self._confirm_breaking_signatures():
             return False
         path, _ = QFileDialog.getSaveFileName(self, tr("Save as"), self.doc.path or self._last_dir(),
                                                 _pdf_filter())
@@ -592,20 +715,27 @@ class MainWindow(QMainWindow):
             if self._run(lambda: self.doc.delete_pages(pages)):
                 self.thumbs.clearSelection()
 
-    def _lines(self, pno: int):
-        cached = self._lines_cache.get(pno)
+    def _text_items(self, kind: str, pno: int) -> list:
+        """Cached `text_lines` ("lines") or `text_blocks` ("blocks") of a page."""
+        cached = self._text_cache.get((kind, pno))
         if cached and cached[0] == self.doc.revision:
             return cached[1]
-        lines = self.doc.text_lines(pno)
-        self._lines_cache[pno] = (self.doc.revision, lines)
-        return lines
+        items = self.doc.text_lines(pno) if kind == "lines" else self.doc.text_blocks(pno)
+        self._text_cache[(kind, pno)] = (self.doc.revision, items)
+        return items
+
+    def _text_item_at(self, kind: str, pno: int, x: float, y: float):
+        p = pymupdf.Point(x, y)
+        return next((item for item in self._text_items(kind, pno) if p in item.rect), None)
 
     def _hover_rect(self, tool: Tool, pno: int, x: float, y: float):
-        if tool == Tool.EDIT_TEXT:
-            p = pymupdf.Point(x, y)
-            return next((l.rect for l in self._lines(pno) if p in l.rect), None)
+        if tool in (Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH):
+            item = self._text_item_at("lines" if tool == Tool.EDIT_TEXT else "blocks", pno, x, y)
+            return item.rect if item else None
         if tool == Tool.ERASE:
             return self.doc.annot_rect_at(pno, x, y)
+        if tool == Tool.NOTE:
+            return self.doc.annot_rect_at(pno, x, y) if self.doc.note_at(pno, x, y) else None
         return None
 
     def _on_click(self, pno: int, x: float, y: float):
@@ -619,16 +749,32 @@ class MainWindow(QMainWindow):
                 self._run(lambda: self.doc.add_text(
                     pno, x, y, dlg.text.toPlainText(), dlg.size.value(), dialogs.rgb(dlg.color.color),
                     dlg.family.currentData(), dlg.bold.isChecked()), [pno])
-        elif tool == Tool.EDIT_TEXT:
-            p = pymupdf.Point(x, y)
-            line = next((l for l in self._lines(pno) if p in l.rect), None)
-            if line is None:
+        elif tool in (Tool.EDIT_TEXT, Tool.EDIT_PARAGRAPH):
+            item = self._text_item_at("lines" if tool == Tool.EDIT_TEXT else "blocks", pno, x, y)
+            if item is None:
                 self.statusBar().showMessage(tr("There is no editable text here. (Text on scanned pages is an "
                                                  "image and cannot be edited.)"), 5000)
                 return
-            dlg = dialogs.EditLineDialog(self, line.text, line.size)
-            if dlg.exec() and (dlg.text.text() != line.text or dlg.size.value() != line.size):
-                self._run(lambda: self.doc.replace_line(line, dlg.text.text(), dlg.size.value()), [pno])
+            if tool == Tool.EDIT_TEXT:
+                dlg = dialogs.EditLineDialog(self, item.text, item.size)
+                if dlg.exec() and (dlg.text.text() != item.text or dlg.size.value() != item.size):
+                    self._run(lambda: self.doc.replace_line(item, dlg.text.text(), dlg.size.value()), [pno])
+            else:
+                dlg = dialogs.EditParagraphDialog(self, item.text, item.size)
+                text = dlg.text.toPlainText
+                if dlg.exec() and (text() != item.text or dlg.size.value() != item.size):
+                    self._run(lambda: self.doc.replace_block(item, text(), dlg.size.value()), [pno])
+        elif tool == Tool.NOTE:
+            existing = self.doc.note_at(pno, x, y)
+            dlg = dialogs.NoteDialog(self, existing[1] if existing else "")
+            if not dlg.exec():
+                return
+            text = dlg.text.toPlainText()
+            if existing:
+                if text != existing[1]:
+                    self._run(lambda: self.doc.set_note_text(pno, existing[0], text), [pno])
+            elif text.strip():
+                self._run(lambda: self.doc.add_note(pno, x, y, text), [pno])
         elif tool == Tool.ERASE:
             if self.doc.annot_rect_at(pno, x, y) is None:
                 self.statusBar().showMessage(tr("There is no annotation to erase here. Use Undo (Ctrl+Z) for "
@@ -638,6 +784,11 @@ class MainWindow(QMainWindow):
 
     def _on_stroke(self, pno: int, points: list):
         self._run(lambda: self.doc.add_ink(pno, [points], dialogs.rgb(self.view.pen_color), self.view.pen_width), [pno])
+
+    def _on_line(self, pno: int, start, end):
+        arrow = self.view.tool == Tool.ARROW
+        self._run(lambda: self.doc.add_line(pno, start, end, dialogs.rgb(self.view.pen_color),
+                                            self.view.pen_width, arrow), [pno])
 
     @staticmethod
     def _box_at(rect: pymupdf.Rect, width: float, aspect: float, page_size) -> pymupdf.Rect:
@@ -678,6 +829,41 @@ class MainWindow(QMainWindow):
             request = self._pending_sign
             self._set_tool(Tool.BROWSE)
             self._finish_digital_sign(request, pno, box)
+        elif tool in (Tool.RECT, Tool.ELLIPSE):
+            kind = "rect" if tool == Tool.RECT else "ellipse"
+            self._run(lambda: self.doc.add_shape(pno, kind, rect, dialogs.rgb(self.view.pen_color),
+                                                 self.view.pen_width), [pno])
+        elif tool == Tool.STAMP:
+            dlg = dialogs.StampDialog(self, self.settings.value("stamp_text", ""),
+                                      QColor(self.settings.value("stamp_color", "#c81e1e")))
+            if not dlg.exec():
+                return
+            text = dlg.text.currentText().strip()
+            self.settings.setValue("stamp_text", text)
+            self.settings.setValue("stamp_color", dlg.color.color.name())
+            box = self._box_at(rect, 160, 3.2, size)
+            self._run(lambda: self.doc.add_stamp(pno, box, text, dialogs.rgb(dlg.color.color)), [pno])
+        elif tool == Tool.REDACT:
+            if rect.width >= 2 and rect.height >= 2:
+                self._run(lambda: self.doc.mark_redactions([(pno, rect)]), [pno])
+        elif tool == Tool.CROP:
+            if rect.width < 10 or rect.height < 10:
+                return
+            selected = self.thumbs.selected_pages()
+            pages = selected if pno in selected else [pno]  # the framed page, plus the others selected with it
+            if self._run(lambda: self.doc.crop_pages(pages, rect), pages):
+                self._set_tool(Tool.BROWSE)
+        elif tool == Tool.FORM_FIELD:
+            dlg = dialogs.FormFieldDialog(self, self.doc.suggest_field_name)
+            if not dlg.exec():
+                return
+            kind = dlg.kind.currentData()
+            width, aspect = {"checkbox": (14, 1.0), "multiline": (220, 3.0), "listbox": (160, 2.0)}.get(
+                kind, (180, 9.0))
+            box = self._box_at(rect, width, aspect, size)
+            if self._run(lambda: self.doc.add_form_field(pno, box, kind, dlg.name.text(), dlg.option_list()), [pno]):
+                self.forms_dock.show()
+                self._load_form_fields()
 
     def _apply_form(self, values: dict):
         self._run(lambda: self.doc.set_form_values(values))
@@ -687,6 +873,192 @@ class MainWindow(QMainWindow):
         self.form_panel.set_fields(fields)
         if show_if_any:
             self.forms_dock.setVisible(bool(fields))
+
+    # ---- search ----------------------------------------------------------------
+
+    def find(self):
+        if self.doc:
+            self.find_bar.open_bar()
+
+    def _search(self, query: str, keep_position: bool = False):
+        if not self.doc:
+            return
+        old = self._hits[self._hit_index] if keep_position and self._hit_index is not None else None
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self._hits = self.doc.search(query)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not self._hits:
+            self._hit_index = None
+        elif old is not None:
+            # Stay near the previous match after an edit.
+            self._hit_index = next((i for i, h in enumerate(self._hits)
+                                    if (h.page, h.rect.y0, h.rect.x0) >= (old.page, old.rect.y0, old.rect.x0)), 0)
+        else:
+            current = self.view.current_page()
+            self._hit_index = next((i for i, h in enumerate(self._hits) if h.page >= current), 0)
+        self._show_hits(scroll=not keep_position)
+
+    def _step_hit(self, step: int):
+        if not self._hits:
+            if self.find_bar.edit.text().strip():
+                self._search(self.find_bar.edit.text())
+            return
+        self._hit_index = ((self._hit_index or 0) + step) % len(self._hits)
+        self._show_hits()
+
+    def _show_hits(self, scroll: bool = True):
+        by_page: dict[int, list] = {}
+        for h in self._hits:
+            by_page.setdefault(h.page, []).append(h.rect)
+        current = None
+        if self._hit_index is not None:
+            hit = self._hits[self._hit_index]
+            current = (hit.page, hit.rect)
+            if scroll:
+                self.view.show_rect(hit.page, hit.rect)
+        self.view.set_search_hits(by_page, current)
+        self.find_bar.set_status(self._hit_index, len(self._hits))
+
+    def _clear_search(self):
+        self._hits = []
+        self._hit_index = None
+        self.view.set_search_hits({}, None)
+
+    def _redact_hits(self):
+        if not self._hits:
+            return
+        count = len(self._hits)
+        if self._run(lambda: self.doc.mark_redactions([(h.page, h.rect) for h in self._hits])):
+            self.statusBar().showMessage(tr("{count} match(es) marked for redaction. Apply them with Document › "
+                                            "Apply redactions.", count=count), 8000)
+
+    # ---- bookmarks ---------------------------------------------------------------
+
+    def _load_bookmarks(self):
+        self.bookmark_panel.set_bookmarks(self.doc.bookmarks() if self.doc else [], enabled=self.doc is not None)
+
+    def _add_bookmark(self, after):
+        pno = self.view.current_page()
+        title, ok = QInputDialog.getText(self, tr("Add bookmark"), tr("Bookmark title:"),
+                                         text=tr("Page {number}", number=pno + 1))
+        if ok:
+            self._run(lambda: self.doc.add_bookmark(title, pno, after), [])
+
+    def _rename_bookmark(self, index: int):
+        current = self.doc.bookmarks()[index].title
+        title, ok = QInputDialog.getText(self, tr("Rename bookmark"), tr("Bookmark title:"), text=current)
+        if ok and title != current:
+            self._run(lambda: self.doc.rename_bookmark(index, title), [])
+
+    def _delete_bookmark(self, index: int):
+        title = self.doc.bookmarks()[index].title
+        if QMessageBox.question(self, APP_NAME, tr("Delete the bookmark \"{title}\" and the bookmarks "
+                                                   "under it?", title=title)) == QMessageBox.StandardButton.Yes:
+            self._run(lambda: self.doc.delete_bookmark(index), [])
+
+    # ---- document --------------------------------------------------------------
+
+    def _page_scope(self) -> dialogs.PageScope:
+        return dialogs.PageScope(self.doc.page_count, self.view.current_page(), self.thumbs.selected_pages())
+
+    def reset_crop(self):
+        pages = self._target_pages()
+        self._run(lambda: self.doc.reset_crop(pages), pages)
+
+    def add_watermark(self):
+        dlg = dialogs.WatermarkDialog(self, self._page_scope())
+        if dlg.exec():
+            pages = dlg.scope.pages()
+            self._run(lambda: self.doc.add_watermark(
+                pages, dlg.text.text(), dlg.size.value(), dialogs.rgb(dlg.color.color), dlg.opacity.value() / 100,
+                dlg.angle.value(), dlg.behind.isChecked()), pages)
+
+    def add_header_footer(self):
+        dlg = dialogs.HeaderFooterDialog(self, self._page_scope())
+        if dlg.exec():
+            pages = dlg.scope.pages()
+            self._run(lambda: self.doc.add_header_footer(
+                pages, dlg.texts(), dlg.size.value(), dialogs.rgb(dlg.color.color), dlg.margin.value(),
+                dlg.family.currentData()), pages)
+
+    def apply_redactions(self):
+        count = self.doc.redaction_count()
+        if not count:
+            dialogs.warn(self, tr("There are no redaction marks. Mark areas with the Redact tool or with "
+                                  "Find › Mark all for redaction first."))
+            return
+        if QMessageBox.warning(
+                self, APP_NAME,
+                tr("Permanently remove the text, images and drawings under {count} redaction mark(s)? The areas "
+                   "are filled with black. Once the file is saved this cannot be undone.", count=count),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            if self._run(self.doc.apply_redactions):
+                self.statusBar().showMessage(tr("Redactions applied. Save the document to keep the result."), 6000)
+
+    def _base_name(self) -> str:
+        return Path(self.doc.path).stem if self.doc.path else tr("document")
+
+    def _save_copy_path(self, title: str, filename: str, file_filter: str) -> str | None:
+        folder = os.path.dirname(self.doc.path) if self.doc.path else self._last_dir()
+        path, _ = QFileDialog.getSaveFileName(self, title, str(Path(folder) / filename), file_filter)
+        return path or None
+
+    def compress(self):
+        dlg = dialogs.CompressDialog(self, self.doc.has_signatures())
+        if not dlg.exec():
+            return
+        path = self._save_copy_path(tr("Save compressed copy"),
+                                    tr("{base}_compressed.pdf", base=self._base_name()), _pdf_filter())
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        if self.doc.path and os.path.abspath(path) == self.doc.path:
+            dialogs.warn(self, tr("Choose a different file name; the compressed copy cannot replace the open "
+                                  "document."))
+            return
+        before = len(self.doc.disk_bytes) if self.doc.disk_bytes is not None and not self.doc.dirty else None
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            data = self.doc.compressed_bytes(dlg.level.currentData())
+            write_file(path, data)
+        except (PdfError, OSError, RuntimeError) as e:
+            dialogs.warn(self, tr("Could not save: {error}", error=e))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        if before:
+            text = tr("Compressed copy saved:\n{path}\n\n{before} → {after} ({percent}% smaller)", path=path,
+                      before=_megabytes(before), after=_megabytes(len(data)),
+                      percent=max(0, round(100 - 100 * len(data) / before)))
+        else:
+            text = tr("Compressed copy saved:\n{path}\n\nSize: {after}", path=path, after=_megabytes(len(data)))
+        QMessageBox.information(self, APP_NAME, text)
+
+    def export_images(self):
+        dlg = dialogs.ExportImagesDialog(self, self._page_scope())
+        if not dlg.exec():
+            return
+        fmt = dlg.fmt.currentData()
+        file_filter = tr("PNG images (*.png)") if fmt == "png" else tr("JPEG images (*.jpg)")
+        path = self._save_copy_path(tr("Export pages as images"), f"{self._base_name()}.{fmt}", file_filter)
+        if not path:
+            return
+        base = str(Path(path).with_suffix(""))
+        pages = dlg.scope.pages()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            written = self.doc.export_images(pages, base, fmt, dlg.dpi.currentData())
+        except (PdfError, OSError, RuntimeError) as e:
+            dialogs.warn(self, tr("Could not save: {error}", error=e))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.statusBar().showMessage(tr("{count} image(s) saved, e.g. {path}", count=len(written),
+                                        path=written[0]), 8000)
 
     # ---- signatures ----------------------------------------------------------
 
