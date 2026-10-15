@@ -16,12 +16,12 @@ from PySide6.QtWidgets import (QApplication, QColorDialog, QComboBox, QDockWidge
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_ID, APP_NAME, ORG_NAME
-from ..core import richtext, signing
+from ..core import richtext, shell, signing
 from ..core.document import PasswordRequired, PdfDocument, PdfError, SearchHit, write_file
 from ..core.richtext import TextStyle
 from ..core.signing import SigningError
 from ..i18n import LANGUAGES, tr
-from . import dialogs
+from . import dialogs, palette
 from .page_view import PageView, Tool
 from .panels import BookmarkPanel, FindBar, FormPanel, ThumbnailList
 
@@ -210,6 +210,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         self._set_tool(Tool.BROWSE)
         self._refresh_ui()
+        self._follow_moved_folder()
 
     # ---- construction ------------------------------------------------------
 
@@ -315,6 +316,10 @@ class MainWindow(QMainWindow):
         self.act_watermark = self._action(tr("Add watermark…"), self.add_watermark)
         self.act_header_footer = self._action(tr("Add header and footer…"), self.add_header_footer)
         self.act_reset_crop = self._action(tr("Remove crop (selected pages)"), self.reset_crop)
+        self.act_palette = self._action(tr("Command palette…"), lambda: palette.run_palette(self), "Ctrl+K",
+                                        tip=tr("Find any command by typing part of its name"))
+        self.act_open_with = self._action(tr("Show in “Open with” for PDF files"), self._toggle_open_with)
+        self.act_open_with.setCheckable(True)
 
         self.tool_group = QActionGroup(self)
         self.tool_actions: dict[Tool, QAction] = {}
@@ -402,6 +407,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(T[Tool.FORM_FIELD])
         m = mb.addMenu(tr("&View"))
+        m.addAction(self.act_palette)
+        m.addSeparator()
         m.addActions([self.act_zoom_in, self.act_zoom_out, self.act_fit, self.act_actual])
         m.addSeparator()
         m.addActions([self.act_bookmarks, self.act_forms])
@@ -422,6 +429,8 @@ class MainWindow(QMainWindow):
             lang_group.addAction(a)
             lang_menu.addAction(a)
             self._lang_actions[code] = a
+        help_menu.addAction(self.act_open_with)
+        help_menu.aboutToShow.connect(self._update_open_with_action)
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
@@ -1565,6 +1574,42 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         dialogs.VerifyDialog(self, infos, note).exec()
+
+    # ---- Explorer integration ------------------------------------------------------
+
+    def _update_open_with_action(self):
+        exe = shell.current_exe()
+        a = self.act_open_with
+        a.setVisible(shell.supported())
+        a.setEnabled(exe is not None)
+        a.setToolTip("" if exe else tr("Available in the packaged app (LeafpenPDF.exe)."))
+        registered = shell.registered_exe() if shell.supported() else None
+        a.setChecked(bool(exe and registered and os.path.normcase(registered) == os.path.normcase(exe)))
+
+    def _toggle_open_with(self, on: bool):
+        exe = shell.current_exe()
+        if exe is None:
+            return
+        try:
+            if on:
+                shell.register(exe, APP_NAME)
+                self.statusBar().showMessage(tr("{name} now appears under Open with for PDF files. Your default "
+                                                "PDF program is unchanged.", name=APP_NAME), 8000)
+            else:
+                shell.unregister()
+                self.statusBar().showMessage(tr("{name} was removed from Open with.", name=APP_NAME), 6000)
+        except OSError as e:
+            dialogs.warn(self, tr("Windows did not allow the change: {error}", error=e))
+        self._update_open_with_action()
+
+    def _follow_moved_folder(self):
+        """The portable folder was moved: keep an existing "Open with" entry working."""
+        exe = shell.current_exe()
+        if exe and shell.supported():
+            try:
+                shell.refresh_if_moved(exe, APP_NAME)
+            except OSError:
+                pass
 
     # ---- language ------------------------------------------------------------
 

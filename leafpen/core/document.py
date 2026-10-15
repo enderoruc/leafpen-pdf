@@ -243,7 +243,7 @@ def _fold_char(c: str) -> str:
     return low if len(low) == 1 else c
 
 
-def _fold(text: str) -> str:
+def fold(text: str) -> str:
     """Case-fold one character at a time, so indexes stay aligned with the original text."""
     return "".join(_fold_char(c) for c in text)
 
@@ -725,7 +725,7 @@ class PdfDocument:
         Matching is done here rather than with MuPDF's search, which folds only
         ASCII case: "ikinci" must find "İKİNCİ" and "Ikinci" as well.
         """
-        needle = _fold(" ".join(query.split()))
+        needle = fold(" ".join(query.split()))
         if not needle:
             return []
         hits = []
@@ -735,7 +735,7 @@ class PdfDocument:
             for block in page.get_text("rawdict")["blocks"]:
                 for line in block.get("lines", ()):
                     chars = [c for s in line["spans"] for c in s["chars"]]
-                    hay = _fold("".join(c["c"] for c in chars))
+                    hay = fold("".join(c["c"] for c in chars))
                     start = hay.find(needle)
                     while start >= 0:
                         r = pymupdf.Rect(chars[start]["bbox"])

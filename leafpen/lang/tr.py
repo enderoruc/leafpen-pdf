@@ -497,4 +497,18 @@ MESSAGES = {
     "Recent files": "Son açılanlar",
     "The file no longer exists:\n{path}\n\nIt was removed from the list.":
         "Dosya artık yok:\n{path}\n\nListeden kaldırıldı.",
+
+    # --- command palette ---
+    "Command palette…": "Komut paleti…",
+    "Find any command by typing part of its name": "Herhangi bir komutu adının bir kısmını yazarak bulun",
+    "Type a command…": "Bir komut yazın…",
+    "Not available now (open a document first).": "Şu anda kullanılamaz (önce bir belge açın).",
+
+    # --- Explorer "Open with" ---
+    "Show in “Open with” for PDF files": "PDF dosyaları için “Birlikte aç” listesinde göster",
+    "Available in the packaged app (LeafpenPDF.exe).": "Paketlenmiş uygulamada (LeafpenPDF.exe) kullanılabilir.",
+    "{name} now appears under Open with for PDF files. Your default PDF program is unchanged.":
+        "{name} artık PDF dosyaları için Birlikte aç listesinde. Varsayılan PDF programınız değişmedi.",
+    "{name} was removed from Open with.": "{name}, Birlikte aç listesinden kaldırıldı.",
+    "Windows did not allow the change: {error}": "Windows bu değişikliğe izin vermedi: {error}",
 }

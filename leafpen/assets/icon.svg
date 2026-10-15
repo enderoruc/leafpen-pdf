@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Leafpen: a leaf whose lower point is a pen nib (slit and breather hole along the midrib).
+       SVG Tiny only: Qt's renderer ignores clip paths, so nothing may cross the leaf's edge. -->
+  <defs>
+    <linearGradient id="leaf" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#15803d"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(128 128) rotate(45) scale(0.93) translate(-128 -128)">
+    <path d="M128 4 C 196 58, 206 150, 128 252 C 50 150, 60 58, 128 4 Z" fill="url(#leaf)"/>
+    <path d="M123 150 L 133 150 L 129.5 228 L 126.5 228 Z" fill="#ffffff"/>
+    <circle cx="128" cy="134" r="17" fill="#ffffff"/>
+  </g>
+</svg>

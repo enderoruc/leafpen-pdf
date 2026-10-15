@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDia
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
                                QPushButton, QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
-from .. import APP_NAME
+from .. import APP_NAME, APP_VERSION
 from ..core import fonts, signing
 from ..core.document import NOTE_ICONS
 from ..core.signing import SignatureInfo, SigningError
@@ -802,7 +802,7 @@ class VerifyDialog(QDialog):
 
 def about_html() -> str:
     return f"""
-<h3>{APP_NAME}</h3>
+<h3>{APP_NAME} {APP_VERSION}</h3>
 <p>{tr("An offline, free PDF editor and signer. No data ever leaves your computer.")}</p>
 <p>{tr("Open-source components used:")}</p>
 <ul>

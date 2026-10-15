@@ -30,7 +30,15 @@ Every edit can be undone and redone (Ctrl+Z / Ctrl+Y).
 ## Usage
 
 Run `dist\LeafpenPDF\LeafpenPDF.exe`. The whole folder is portable and the target machine does
-not need Python installed.
+not need Python installed; to hand it on, share `dist\LeafpenPDF-v<version>-win64.zip`.
+
+To have Leafpen listed under **Open with** for PDF files, use **Help › Show in "Open with" for PDF
+files**. This writes only to your own user's registry (no administrator rights), never changes your
+default PDF program, and is undone by unticking the same menu item. If you move the folder, the
+entry follows the next time you start the app from its new place.
+
+Press **Ctrl+K** for the command palette: type part of any command or tool name (Turkish letters
+are optional, so `dikdortgen` finds *Dikdörtgen*) and press Enter.
 
 To run from source:
 
@@ -40,7 +48,9 @@ py -m venv .venv
 .venv\Scripts\python -m leafpen [file.pdf]
 ```
 
-To build, run `.\build.ps1`. It runs the tests first, then produces `dist\LeafpenPDF\`.
+To build, run `.\build.ps1`. It runs the tests first, then produces `dist\LeafpenPDF\` and the zip
+(with its SHA-256 for the release notes). The app icon is `leafpen/assets/icon.svg`; after changing
+it, run `.venv\Scripts\python tools\make_icon.py` to regenerate `icon.ico`.
 To run only the tests, install `pytest` (`pip install pytest pyinstaller`) and run `pytest`.
 
 Two sample PDFs for manual testing are in [samples](samples): `sample-en.pdf` and `sample-tr.pdf`.
