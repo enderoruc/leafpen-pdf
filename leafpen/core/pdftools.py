@@ -16,6 +16,34 @@ PAGE_SIZES = {"a4": pymupdf.paper_size("a4"), "letter": pymupdf.paper_size("lett
 # Image types MuPDF opens itself; others are converted to PNG by the caller.
 IMAGE_TYPES = ("png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff", "jxr", "jpx", "jp2", "pnm", "pbm", "pgm",
                "ppm", "psd")
+# Phone photo types neither MuPDF nor Qt read; decoded with pillow-heif (see heic_to_image).
+HEIC_TYPES = ("heic", "heif")
+
+
+def is_heic(name: str) -> bool:
+    return os.path.splitext(name)[1].lstrip(".").lower() in HEIC_TYPES
+
+
+def heic_to_image(data: bytes) -> tuple[str, bytes]:
+    """(extension, bytes) of the primary image of a HEIC/HEIF file: JPEG, or PNG if it has transparency.
+
+    libheif applies the file's rotation/mirroring while decoding, so the result is upright.
+    """
+    import io
+
+    import pillow_heif
+
+    try:
+        heif = pillow_heif.open_heif(data, convert_hdr_to_8bit=True)
+        img = heif.to_pillow()
+    except Exception as e:
+        raise PdfError(tr("The image file could not be read.")) from e
+    buf = io.BytesIO()
+    if img.mode in ("RGBA", "LA"):
+        img.save(buf, "PNG")
+        return "png", buf.getvalue()
+    img.convert("RGB").save(buf, "JPEG", quality=92)
+    return "jpg", buf.getvalue()
 
 
 def _label(name: str) -> str:

@@ -223,6 +223,7 @@ _WIDGET_TYPES = {
 HF_SLOTS = ("header_left", "header_center", "header_right", "footer_left", "footer_center", "footer_right")
 _ALIGN = {"left": pymupdf.TEXT_ALIGN_LEFT, "center": pymupdf.TEXT_ALIGN_CENTER, "right": pymupdf.TEXT_ALIGN_RIGHT}
 
+A4_SHORT_SIDE = pymupdf.paper_size("a4")[0]  # points; the page size text sizes are meant for
 # Image settings for "reduce file size": (images above this dpi..., are resampled to this dpi, JPEG quality)
 COMPRESSION_LEVELS = {"high": (300, 200, 85), "medium": (225, 150, 75), "low": (150, 96, 60)}
 
@@ -461,6 +462,15 @@ class PdfDocument:
     def page_size(self, pno: int) -> tuple[float, float]:
         r = self._doc[pno].rect
         return r.width, r.height
+
+    def text_scale(self, pno: int) -> float:
+        """How much larger than an A4 page this page is (its short side; at least 1).
+
+        New text starts at the remembered size times this, so it looks the same on a page made
+        from a large photo (thousands of points wide) as on a normal page.
+        """
+        r = self._doc[pno].rect
+        return max(1.0, min(r.width, r.height) / A4_SHORT_SIDE)
 
     def render(self, pno: int, zoom: float) -> pymupdf.Pixmap:
         return self._doc[pno].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)

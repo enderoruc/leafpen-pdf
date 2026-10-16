@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComb
 from .. import APP_NAME, APP_VERSION
 from ..core import fonts, signing
 from ..core.document import NOTE_ICONS, PdfError
-from ..core.pdftools import IMAGE_TYPES, every_n_pages, parse_ranges
+from ..core.pdftools import HEIC_TYPES, IMAGE_TYPES, every_n_pages, heic_to_image, is_heic, parse_ranges
 from ..core.signing import SignatureInfo, SigningError
 from ..i18n import fmt_datetime, tr
 
@@ -428,7 +428,7 @@ class MergeDialog(FileListDialog):
         self.options.addRow(self.bookmarks)
 
 
-IMAGE_EXTENSIONS = ("png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff", "webp")
+IMAGE_EXTENSIONS = ("png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff", "webp") + HEIC_TYPES
 
 
 class ImagesToPdfDialog(FileListDialog):
@@ -455,8 +455,23 @@ class ImagesToPdfDialog(FileListDialog):
         self.options.addRow(tr("Margin:"), self.margin)
 
 
+def read_image(path: str) -> bytes:
+    """The bytes of an image file in a format MuPDF and Qt read (HEIC is converted). Raises OSError, PdfError."""
+    data = Path(path).read_bytes()
+    return heic_to_image(data)[1] if is_heic(path) else data
+
+
 def image_file(path: str) -> tuple[str, bytes]:
-    """(name, bytes) of an image for `images_to_pdf`; types MuPDF cannot read are converted to PNG."""
+    """(name, bytes) of an image for `images_to_pdf`; types MuPDF cannot read are converted to PNG
+    (HEIC to JPEG)."""
+    if is_heic(path):
+        with open(path, "rb") as f:
+            data = f.read()
+        try:
+            ext, data = heic_to_image(data)
+        except PdfError as e:
+            raise PdfError(tr("Could not read the image {name}.", name=os.path.basename(path))) from e
+        return os.path.splitext(path)[0] + "." + ext, data
     if os.path.splitext(path)[1].lstrip(".").lower() in IMAGE_TYPES:
         with open(path, "rb") as f:
             return path, f.read()
@@ -770,10 +785,13 @@ class CreateSignatureDialog(QDialog):
 
     def _pick_image(self):
         path, _ = QFileDialog.getOpenFileName(self, tr("Signature image"), "",
-                                              tr("Images (*.png *.jpg *.jpeg *.bmp)"))
+                                              tr("Images (*.png *.jpg *.jpeg *.bmp *.heic *.heif)"))
         if not path:
             return
-        img = QImage(path)
+        try:
+            img = QImage.fromData(read_image(path))
+        except (OSError, PdfError):
+            img = QImage()
         if img.isNull():
             warn(self, tr("The image could not be read."))
             return

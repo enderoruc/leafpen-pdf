@@ -225,3 +225,11 @@ def test_form_fill_round_trip(tmp_path):
     doc.save(str(path))
     got = {f.name: f.value for f in PdfDocument.open(str(path)).form_fields()}
     assert got == {"ad": "Şule Çağlar", "onay": True, "sehir": "İzmir", "cins": second}
+
+
+def test_text_scale_follows_page_size():
+    doc = PdfDocument(make_pdf(text_lines=()))  # 400 x 300 pt: smaller than A4
+    assert doc.text_scale(0) == 1.0
+    big = pymupdf.open()
+    big.new_page(width=3024, height=2268)  # a page made from a phone photo
+    assert PdfDocument(big.tobytes()).text_scale(0) == pytest.approx(2268 / 595.28, rel=1e-3)

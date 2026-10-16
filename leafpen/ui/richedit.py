@@ -143,11 +143,12 @@ class FormatBar(QFrame):
         self.family.setToolTip(tr("Font"))
         self.family.activated.connect(lambda _i: editor.apply(family=self.family.currentData()))
         self.size = QDoubleSpinBox()
-        self.size.setRange(4, 96)
+        self.size.setRange(4, 1000)  # pages made from photos are several times larger than A4
         self.size.setDecimals(1)
         self.size.setSuffix(" pt")
         self.size.setToolTip(tr("Size"))
-        self.size.editingFinished.connect(lambda: editor.apply(size=self.size.value()))
+        self.size.setKeyboardTracking(False)  # typed sizes apply on Enter or leaving the field
+        self.size.valueChanged.connect(lambda v: editor.apply(size=v, focus=not self.size.hasFocus()))
         self.bold = self._toggle("B", tr("Bold (Ctrl+B)"), lambda on: editor.apply(bold=on))
         f = self.bold.font()
         f.setBold(True)
@@ -320,7 +321,8 @@ class InlineTextEditor(QObject):
 
     # ---- formatting ----------------------------------------------------------------
 
-    def apply(self, *, family=None, size=None, bold=None, italic=None, color=None):
+    def apply(self, *, family=None, size=None, bold=None, italic=None, color=None, focus=True):
+        """Format the selection, or the whole text if nothing is selected (and what is typed next)."""
         fmt = QTextCharFormat()
         if family is not None:
             fmt.setFontFamilies([QT_FAMILY[family]])
@@ -332,8 +334,14 @@ class InlineTextEditor(QObject):
             fmt.setFontItalic(italic)
         if color is not None:
             fmt.setForeground(QColor(color))
+        if not self.box.textCursor().hasSelection():
+            cursor = QTextCursor(self.box.document())
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.mergeCharFormat(fmt)
+            cursor.mergeBlockCharFormat(fmt)  # an empty box keeps it when clicked into
         self.box.mergeCurrentCharFormat(fmt)
-        self.box.setFocus()
+        if focus:
+            self.box.setFocus()
 
     def set_align(self, align: str):
         self.align = align

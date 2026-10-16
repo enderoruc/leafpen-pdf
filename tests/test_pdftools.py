@@ -4,7 +4,8 @@ import pymupdf
 import pytest
 
 from leafpen.core.document import PdfDocument, PdfError
-from leafpen.core.pdftools import every_n_pages, images_to_pdf, merge_pdfs, parse_ranges, repair_pdf
+from leafpen.core.pdftools import (every_n_pages, heic_to_image, images_to_pdf, is_heic, merge_pdfs, parse_ranges,
+                                   repair_pdf)
 
 from .conftest import make_pdf
 
@@ -29,6 +30,18 @@ def jpeg_with_orientation(width: int, height: int, orientation: int) -> bytes:
             + struct.pack(">H", orientation) + b"\x00\x00\x00\x00\x00\x00")
     app1 = b"Exif\x00\x00" + tiff
     return data[:2] + b"\xff\xe1" + struct.pack(">H", len(app1) + 2) + app1 + data[2:]
+
+
+def heic(width: int, height: int, mode: str = "RGB") -> bytes:
+    import io
+
+    import pillow_heif
+    from PIL import Image
+
+    pillow_heif.register_heif_opener()
+    buf = io.BytesIO()
+    Image.new(mode, (width, height), (90, 160, 220, 128)[:len(mode)]).save(buf, "HEIF")
+    return buf.getvalue()
 
 
 # ---- merge -------------------------------------------------------------------
@@ -90,6 +103,25 @@ def test_images_bad_file_is_named():
         images_to_pdf([("broken.png", b"\x89PNG nope")])
     with pytest.raises(PdfError):
         images_to_pdf([])
+
+
+def test_heic_is_converted():
+    assert is_heic("IMG_0001.HEIC") and is_heic("a.heif") and not is_heic("a.jpg")
+    ext, data = heic_to_image(heic(120, 80))
+    assert ext == "jpg"
+    pix = pymupdf.Pixmap(data)
+    assert (pix.width, pix.height) == (120, 80)
+    assert heic_to_image(heic(40, 40, "RGBA"))[0] == "png"
+    out = pymupdf.open("pdf", images_to_pdf([("photo.jpg", data)]))
+    assert out[0].rect.width > out[0].rect.height
+    with pytest.raises(PdfError):
+        heic_to_image(b"not a heic file")
+
+
+def test_heic_added_to_page():
+    doc = PdfDocument(make_pdf(text_lines=()))
+    doc.add_image(0, pymupdf.Rect(50, 50, 170, 130), heic_to_image(heic(120, 80))[1])
+    assert len(doc._doc[0].get_images()) == 1
 
 
 # ---- repair --------------------------------------------------------------------

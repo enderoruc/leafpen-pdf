@@ -156,8 +156,8 @@ MESSAGES = {
     "There is no annotation to erase here. Use Undo (Ctrl+Z) for added text and images.":
         "Burada silinecek açıklama yok. Eklenen metin ve görseller için Geri al'ı (Ctrl+Z) kullanın.",
     "Choose image": "Görsel seç",
-    "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff)":
-        "Görseller (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff)",
+    "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.heic *.heif)":
+        "Görseller (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.heic *.heif)",
     "Digital ID created:\n{path}\n\nBack up this file and its password in a safe place.":
         "Dijital kimlik oluşturuldu:\n{path}\n\nBu dosyayı ve parolasını güvenli bir yerde yedekleyin.",
     "The document has existing signatures and unsaved changes. If you continue, the existing "
@@ -195,7 +195,7 @@ MESSAGES = {
     "Make the paper background transparent": "Kâğıt arka planını şeffaf yap",
     "Choose image…": "Görsel seç…",
     "Signature image": "İmza görseli",
-    "Images (*.png *.jpg *.jpeg *.bmp)": "Görseller (*.png *.jpg *.jpeg *.bmp)",
+    "Images (*.png *.jpg *.jpeg *.bmp *.heic *.heif)": "Görseller (*.png *.jpg *.jpeg *.bmp *.heic *.heif)",
     "The image could not be read.": "Görsel okunamadı.",
     "Create a signature first.": "Önce bir imza oluşturun.",
     "My signatures": "El imzalarım",

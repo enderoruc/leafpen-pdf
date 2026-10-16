@@ -1158,27 +1158,31 @@ class MainWindow(QMainWindow):
 
     # ---- on-page text editing ----------------------------------------------------
 
-    def _text_style(self) -> TextStyle:
-        """The style new text starts with (remembered from the last text added)."""
+    def _text_style(self, pno: int) -> TextStyle:
+        """The style new text starts with (remembered from the last text added).
+
+        The size is remembered as it would be on an A4 page and scaled to the page's size.
+        """
+        size = float(self.settings.value("text_size", 12)) * self.doc.text_scale(pno)
         return TextStyle(str(self.settings.value("text_family", "sans")),
                          str(self.settings.value("text_bold", "false")) == "true",
                          str(self.settings.value("text_italic", "false")) == "true",
-                         float(self.settings.value("text_size", 12)), dialogs.rgb(self.view.pen_color))
+                         round(size, 1), dialogs.rgb(self.view.pen_color))
 
-    def _remember_text_style(self, style: TextStyle):
+    def _remember_text_style(self, style: TextStyle, pno: int):
         self.settings.setValue("text_family", style.family)
         self.settings.setValue("text_bold", "true" if style.bold else "false")
         self.settings.setValue("text_italic", "true" if style.italic else "false")
-        self.settings.setValue("text_size", style.size)
+        self.settings.setValue("text_size", round(style.size / self.doc.text_scale(pno), 1))
 
     def _start_add_text(self, pno: int, x: float, y: float):
-        style = self._text_style()
+        style = self._text_style(pno)
         width = self.doc.default_text_width(pno, x, style.size)
 
         def commit(r):
             if not r.runs or not "".join(run.text for run in r.runs).strip():
                 return
-            self._remember_text_style(r.runs[0].style)
+            self._remember_text_style(r.runs[0].style, pno)
             self.settings.setValue("text_align", r.align)
             self._run(lambda: self.doc.add_text(pno, x, y, r.runs, align=r.align, line_height=r.line_height,
                                                 width=r.width), [pno])
@@ -1194,7 +1198,7 @@ class MainWindow(QMainWindow):
                 self._run(lambda: self.doc.replace_line(line, r.runs), [line.page])
 
         self.view.start_inline(line.page, x=line.rect.x0, top=line.rect.y0, width=line.rect.width, runs=line.runs,
-                               default=line.runs[0].style if line.runs else self._text_style(), paragraph=False,
+                               default=line.runs[0].style if line.runs else self._text_style(line.page), paragraph=False,
                                min_height=line.rect.height, on_commit=commit)
         self.statusBar().showMessage(tr("Edit the line. Ctrl+Enter or a click outside the box applies it; Esc "
                                         "cancels. Leave it empty to delete the line."))
@@ -1214,7 +1218,7 @@ class MainWindow(QMainWindow):
         first = block.runs[0].style if block.runs else TextStyle(size=block.size)
         top = block.first_baseline - richtext.ascent(first)
         self.view.start_inline(block.page, x=block.left, top=min(top, block.rect.y0), width=block.width,
-                               runs=block.runs, default=block.runs[0].style if block.runs else self._text_style(),
+                               runs=block.runs, default=block.runs[0].style if block.runs else self._text_style(block.page),
                                paragraph=True, align=block.align, line_height=block.line_height,
                                min_height=block.rect.height, on_commit=commit)
         self.statusBar().showMessage(tr("Edit the paragraph. Ctrl+Enter or a click outside the box applies it; "
@@ -1249,10 +1253,13 @@ class MainWindow(QMainWindow):
                 self._run(lambda: self.doc.add_highlight(pno, rect), [pno])
         elif tool == Tool.IMAGE:
             path, _ = QFileDialog.getOpenFileName(self, tr("Choose image"), self._last_dir(),
-                                                  tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff)"))
+                                                  tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.heic *.heif)"))
             if not path:
                 return
-            data = Path(path).read_bytes()
+            data = self._read_files([path], dialogs.read_image)
+            if data is None:
+                return
+            data = data[0]
             img = QImage.fromData(data)
             aspect = img.width() / img.height() if not img.isNull() and img.height() else 1.0
             box = self._box_at(rect, 200, aspect, size)
