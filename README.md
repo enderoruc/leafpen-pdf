@@ -1,46 +1,39 @@
+<div align="center">
+
 # Leafpen PDF
 
-A free, offline PDF editor and signer for Windows. It never touches the network:
-your documents, signatures and certificates stay on your computer.
+**A free, offline PDF editor and signer for Windows.**
+No accounts, no cloud, no watermarks. Your files never leave your computer.
 
-The interface is available in **English** and **Türkçe**. It follows your Windows display
-language by default (Turkish → Turkish, anything else → English), and you can switch at any
-time from **Help › Language**. The app restarts to apply the change.
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6)
+![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB)
+
+![Leafpen PDF](docs/screenshot.png)
+
+</div>
 
 ## Features
 
-| Area | What you can do |
-|---|---|
-| Viewing | Zoom (Ctrl+wheel or the status bar), fit to width, page thumbnails, bookmarks (add, rename, delete), printing, drag-and-drop to open, recent files (File menu and start screen) |
-| Search | Find text (Ctrl+F) with Turkish-aware case matching (`ikinci` finds `İKİNCİ`) |
-| Text | Add text and edit lines or whole paragraphs directly on the page: font, size, bold, italic and color per word; left, centered, right or justified; line spacing and box width. Alignment and mixed styles of existing paragraphs are kept. Full Unicode support, including Turkish characters |
-| Markup | Highlight, freehand pen, rectangle, ellipse, line, arrow (fill, dashed lines, opacity), sticky notes (icon and color), stamps (any text), insert images, erase annotations |
-| Select | Click a shape, stamp, note, image, form field or paragraph to move it (drag or arrow keys), resize it with its handles, change its color, fill, line or opacity, edit it (double-click) or delete it |
-| Redaction | Mark areas (or every search match) and permanently remove the text, images and drawings under them |
-| Pages | Rotate, delete, reorder (drag thumbnails, several at once), crop, insert pages from another PDF, save selected pages as a separate PDF |
-| Page content | Text watermark (angle, opacity, in front or behind), header and footer with page number, page count and date |
-| Forms | Create text, multi-line, checkbox, drop-down and list fields; fill in text fields, checkboxes, radio buttons and drop-downs |
-| Export | Pages as PNG/JPEG images; a compressed copy with smaller images and subset fonts |
-| Handwritten signature | Draw, type or import a scanned signature and place it on a page |
-| Digital signature | PAdES signing with a .p12/.pfx certificate (visible or invisible), self-signed identity creation, signature verification |
-| Security | Open, edit and sign password-protected PDFs; the password is preserved when saving |
+- **Edit text**: change lines or whole paragraphs in place, or add new text. Per-word font, size, bold, italic and color; alignment and line spacing. Full Unicode support
+- **Annotate**: highlight, pen, rectangle, ellipse, line, arrow, sticky notes, stamps and images, with a Select tool to move, resize and restyle them
+- **Redact**: permanently remove text, images and drawings under marked areas or search matches
+- **Organize pages**: rotate, delete, reorder, crop, insert pages from another PDF, extract pages
+- **Page content**: watermarks, headers and footers with page numbers, bookmarks
+- **Forms**: fill in existing fields, or create text, checkbox, drop-down and list fields
+- **Sign**: handwritten signatures (draw, type or scan) and PAdES digital signatures with a `.p12` / `.pfx` certificate, plus offline signature verification
+- **Export**: pages as PNG/JPEG, or a compressed copy of the PDF
+- **Search** (Ctrl+F), **command palette** (Ctrl+K), undo/redo, recent files, and password-protected PDFs
+- **English and Türkçe** interface, following your Windows language (Help › Language to change)
 
-Every edit can be undone and redone (Ctrl+Z / Ctrl+Y).
+## Install
 
-## Usage
+Download `LeafpenPDF-v<version>-win64.zip` from the [Releases](https://github.com/enderoruc/leafpen-pdf/releases) page,
+extract the whole folder and run `LeafpenPDF.exe`. It needs 64-bit Windows 10 or 11 and no installer or Python.
 
-Run `dist\LeafpenPDF\LeafpenPDF.exe`. The whole folder is portable and the target machine does
-not need Python installed; to hand it on, share `dist\LeafpenPDF-v<version>-win64.zip`.
+The executable is not code-signed, so Windows SmartScreen may warn you the first time.
 
-To have Leafpen listed under **Open with** for PDF files, use **Help › Show in "Open with" for PDF
-files**. This writes only to your own user's registry (no administrator rights), never changes your
-default PDF program, and is undone by unticking the same menu item. If you move the folder, the
-entry follows the next time you start the app from its new place.
-
-Press **Ctrl+K** for the command palette: type part of any command or tool name (Turkish letters
-are optional, so `dikdortgen` finds *Dikdörtgen*) and press Enter.
-
-To run from source:
+## Run from source
 
 ```powershell
 py -m venv .venv
@@ -48,68 +41,41 @@ py -m venv .venv
 .venv\Scripts\python -m leafpen [file.pdf]
 ```
 
-To build, run `.\build.ps1`. It runs the tests first, then produces `dist\LeafpenPDF\` and the zip
-(with its SHA-256 for the release notes). The app icon is `leafpen/assets/icon.svg`; after changing
-it, run `.venv\Scripts\python tools\make_icon.py` to regenerate `icon.ico`.
-To run only the tests, install `pytest` (`pip install pytest pyinstaller`) and run `pytest`.
+To run the tests: `.venv\Scripts\python -m pip install pytest`, then `.venv\Scripts\python -m pytest`.
 
-Two sample PDFs for manual testing are in [samples](samples): `sample-en.pdf` and `sample-tr.pdf`.
-Each has a signature box, a form-style page and a table page.
+To build the executable and the release zip (its SHA-256 is printed):
 
-## About digital signatures
+```powershell
+.venv\Scripts\python -m pip install pyinstaller
+.\build.ps1
+```
 
-- **Signing writes to a copy.** Signing never modifies the original file; the signed version is
-  saved separately (`*_signed.pdf`). The signature is appended incrementally, so signatures that
-  are already in the document stay valid.
-- **Limits of a self-signed identity.** An identity created inside the app proves that the
-  document has not changed since signing. The other party will not see your identity as
-  "verified" unless they trust your certificate. For legally recognised signatures (for example
-  a qualified e-signature), use a .pfx/.p12 certificate from an authorised provider.
-  Signing with a smart card or USB token is not supported.
-- **Verification is fully offline.** The trust chain is checked against the Windows root
-  certificate store. Revocation (CRL/OCSP) checking is not performed, and the verification
-  report says so explicitly.
+## Digital signatures
+
+- Signing never modifies the original: the signed copy is saved as `*_signed.pdf`, and signatures already in the document stay valid.
+- A self-signed identity created in the app proves a document has not changed since signing, but others will not see you as "verified" unless they trust your certificate. For legally recognized signatures, use a certificate from an authorized provider. Smart cards and USB tokens are not supported.
+- Verification is offline and checks against the Windows root certificate store. Certificate revocation (CRL/OCSP) is not checked.
 
 ## Known limitations
 
-- Edited text is rewritten with Arial, Times New Roman or Courier New (whichever is closest to
-  the original font). A paragraph that becomes longer grows downwards and may overlap the content
-  below it; the app tells you when it does.
-- The Select tool moves and deletes an image only when it is drawn upright and once on the page
-  (not inside a form XObject). Other images can be removed with the Redact tool.
-- Redaction marks are only marks until you apply them. The app offers to apply them when you save.
-- Stamps are stored as images, so stamp text is not searchable.
-- Text on scanned (image) pages cannot be edited because there is no OCR.
-- Editing a digitally signed document and saving it makes the existing signatures appear
-  invalid. The app warns you before saving.
-- When adding text, the Windows fonts Arial, Times New Roman and Courier New are embedded.
+- Edited text is rewritten in Arial, Times New Roman or Courier New, whichever is closest to the original font.
+- Scanned (image-only) pages cannot be edited: there is no OCR.
+- Editing a digitally signed document invalidates its existing signatures. The app warns you before saving.
+- Stamps are stored as images, so their text is not searchable.
 
-## Adding a language
+## Contributing
 
-Strings in the code are written in English and wrapped in `tr("...")`. To add a language,
-copy `leafpen/lang/tr.py` to a new module, translate the values, then register it in
-`LANGUAGES` and `_CATALOGS` in `leafpen/i18n.py`. A test fails if a string in the code has no
-translation or a catalog entry is unused.
+Issues and pull requests are welcome. Please run the tests before opening a pull request.
+
+All user-facing strings are written in English and wrapped in `tr("...")`. To add a language, copy
+[`leafpen/lang/tr.py`](leafpen/lang/tr.py), translate the values and register the language in
+[`leafpen/i18n.py`](leafpen/i18n.py).
 
 ## License
 
-Leafpen PDF is licensed under the [GNU Affero General Public License v3.0](LICENSE).
-This is required because PyMuPDF is AGPL-3.0: if you distribute the application (including
-the compiled `.exe`), you must also make the source code available under the same license.
+Leafpen PDF is licensed under the [GNU AGPL-3.0](LICENSE). This follows from PyMuPDF being AGPL-3.0:
+if you distribute the application, including the compiled `.exe`, you must provide its source code under the same license.
 
-### Third-party components
-
-| Component | License | Used for |
-|---|---|---|
-| [PyMuPDF / MuPDF](https://github.com/pymupdf/PyMuPDF) | AGPL-3.0 | PDF processing and rendering |
-| [PySide6 / Qt](https://www.qt.io/qt-for-python) | LGPL-3.0 | User interface (dynamically linked) |
-| [pyHanko](https://github.com/MatthiasValvekens/pyHanko) | MIT | PAdES digital signatures |
-| [pyhanko-certvalidator](https://github.com/MatthiasValvekens/certvalidator) | MIT | Certificate chain validation |
-| [cryptography](https://github.com/pyca/cryptography) | Apache-2.0 / BSD | Cryptography and certificate handling |
-
-Arial, Times New Roman and Courier New are owned by Microsoft. These fonts are not
-distributed with the application; they are read from the user's Windows installation and
-embedded into the PDF being edited.
-
-Adobe, Acrobat and Smallpdf are trademarks of their respective owners. This project is not
-affiliated with them.
+Built with [PyMuPDF](https://github.com/pymupdf/PyMuPDF) (AGPL-3.0), [PySide6](https://www.qt.io/qt-for-python) (LGPL-3.0),
+[pyHanko](https://github.com/MatthiasValvekens/pyHanko) (MIT) and [cryptography](https://github.com/pyca/cryptography) (Apache-2.0 / BSD).
+Windows fonts (Arial, Times New Roman, Courier New) are not distributed; they are read from your system and embedded in the PDF you edit.
