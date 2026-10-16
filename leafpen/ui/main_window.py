@@ -327,6 +327,13 @@ class MainWindow(QMainWindow):
         self.act_repair = self._action(tr("Repair a damaged PDF…"), self.repair_pdf)
         self.act_open_with = self._action(tr("Show in “Open with” for PDF files"), self._toggle_open_with)
         self.act_open_with.setCheckable(True)
+        self.act_shortcuts = {
+            "desktop": self._action(tr("Shortcut on the desktop"), lambda on: self._toggle_shortcut("desktop", on)),
+            "start_menu": self._action(tr("Shortcut in the Start menu"),
+                                       lambda on: self._toggle_shortcut("start_menu", on)),
+        }
+        for a in self.act_shortcuts.values():
+            a.setCheckable(True)
 
         self.tool_group = QActionGroup(self)
         self.tool_actions: dict[Tool, QAction] = {}
@@ -444,7 +451,8 @@ class MainWindow(QMainWindow):
             lang_menu.addAction(a)
             self._lang_actions[code] = a
         help_menu.addAction(self.act_open_with)
-        help_menu.aboutToShow.connect(self._update_open_with_action)
+        help_menu.addActions(list(self.act_shortcuts.values()))
+        help_menu.aboutToShow.connect(self._update_explorer_actions)
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
@@ -1740,14 +1748,21 @@ class MainWindow(QMainWindow):
 
     # ---- Explorer integration ------------------------------------------------------
 
-    def _update_open_with_action(self):
+    def _update_explorer_actions(self):
         exe = shell.current_exe()
-        a = self.act_open_with
-        a.setVisible(shell.supported())
-        a.setEnabled(exe is not None)
-        a.setToolTip("" if exe else tr("Available in the packaged app (LeafpenPDF.exe)."))
-        registered = shell.registered_exe() if shell.supported() else None
-        a.setChecked(bool(exe and registered and os.path.normcase(registered) == os.path.normcase(exe)))
+        for a in (self.act_open_with, *self.act_shortcuts.values()):
+            a.setVisible(shell.supported())
+            a.setEnabled(exe is not None)
+            a.setToolTip("" if exe else tr("Available in the packaged app (LeafpenPDF.exe)."))
+        if not (exe and shell.supported()):
+            return
+        registered = shell.registered_exe()
+        self.act_open_with.setChecked(bool(registered and os.path.normcase(registered) == os.path.normcase(exe)))
+        for place, a in self.act_shortcuts.items():
+            try:
+                a.setChecked(shell.shortcut_is_ours(shell.shortcut_path(place, APP_NAME), exe))
+            except OSError:
+                a.setChecked(False)
 
     def _toggle_open_with(self, on: bool):
         exe = shell.current_exe()
@@ -1763,14 +1778,32 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(tr("{name} was removed from Open with.", name=APP_NAME), 6000)
         except OSError as e:
             dialogs.warn(self, tr("Windows did not allow the change: {error}", error=e))
-        self._update_open_with_action()
+        self._update_explorer_actions()
+
+    def _toggle_shortcut(self, place: str, on: bool):
+        exe = shell.current_exe()
+        if exe is None:
+            return
+        try:
+            lnk = shell.shortcut_path(place, APP_NAME)
+            if on:
+                shell.create_shortcut(lnk, exe, APP_NAME)
+                self.statusBar().showMessage(tr("Shortcut created: {path}", path=lnk), 6000)
+            elif shell.shortcut_is_ours(lnk, exe):  # never delete a same-named shortcut to another copy
+                shell.remove_shortcut(lnk)
+                self.statusBar().showMessage(tr("Shortcut removed."), 6000)
+        except OSError as e:
+            dialogs.warn(self, tr("Windows did not allow the change: {error}", error=e))
+        self._update_explorer_actions()
 
     def _follow_moved_folder(self):
-        """The portable folder was moved: keep an existing "Open with" entry working."""
+        """The portable folder was moved: keep an existing "Open with" entry and shortcuts working."""
         exe = shell.current_exe()
         if exe and shell.supported():
             try:
                 shell.refresh_if_moved(exe, APP_NAME)
+                for place in shell.SHORTCUT_PLACES:
+                    shell.refresh_shortcut_if_moved(shell.shortcut_path(place, APP_NAME), exe, APP_NAME)
             except OSError:
                 pass
 

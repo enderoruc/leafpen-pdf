@@ -509,6 +509,10 @@ MESSAGES = {
         "{name} artık PDF dosyaları için Birlikte aç listesinde. Varsayılan PDF programınız değişmedi.",
     "{name} was removed from Open with.": "{name}, Birlikte aç listesinden kaldırıldı.",
     "Windows did not allow the change: {error}": "Windows bu değişikliğe izin vermedi: {error}",
+    "Shortcut on the desktop": "Masaüstünde kısayol",
+    "Shortcut in the Start menu": "Başlat menüsünde kısayol",
+    "Shortcut created: {path}": "Kısayol oluşturuldu: {path}",
+    "Shortcut removed.": "Kısayol kaldırıldı.",
 
     # --- tools: merge, split, images to PDF, passwords, repair ---
     "&Tools": "&Araçlar",

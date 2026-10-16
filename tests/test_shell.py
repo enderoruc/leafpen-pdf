@@ -1,4 +1,5 @@
-"""'Open with' registration, against a private test key (never the real file associations)."""
+"""Explorer integration: "Open with" against a private test key (never the real file associations),
+and shortcuts in temporary folders (never the real desktop or Start menu)."""
 import sys
 import uuid
 
@@ -60,3 +61,36 @@ def test_moved_folder_is_followed(root, tmp_path):
     shell.register(str(other), "Leafpen PDF", root)
     assert not shell.refresh_if_moved(new, "Leafpen PDF", root)
     assert shell.registered_exe(root) == str(other)
+
+
+def test_shortcut_create_read_remove(tmp_path):
+    lnk = str(tmp_path / "Start Menu" / "Leafpen PDF.lnk")  # missing folder is created
+    exe = str(tmp_path / "Leafpen PDF" / "LeafpenPDF.exe")
+    assert shell.shortcut_target(lnk) is None
+    shell.create_shortcut(lnk, exe, "Leafpen PDF")
+    assert shell.shortcut_target(lnk) == exe
+    assert shell.shortcut_is_ours(lnk, exe)
+    assert not shell.shortcut_is_ours(lnk, str(tmp_path / "other" / "LeafpenPDF.exe"))
+    shell.remove_shortcut(lnk)
+    assert shell.shortcut_target(lnk) is None
+    shell.remove_shortcut(lnk)  # removing twice is harmless
+
+
+def test_shortcut_follows_moved_folder(tmp_path):
+    lnk = str(tmp_path / "Leafpen PDF.lnk")
+    old = str(tmp_path / "old" / "LeafpenPDF.exe")  # no longer exists
+    new = str(tmp_path / "new" / "LeafpenPDF.exe")
+    assert not shell.refresh_shortcut_if_moved(lnk, new, "Leafpen PDF")  # no shortcut: nothing to do
+    shell.create_shortcut(lnk, old, "Leafpen PDF")
+    assert shell.refresh_shortcut_if_moved(lnk, new, "Leafpen PDF")
+    assert shell.shortcut_target(lnk) == new
+    # a same-named shortcut to another program is left alone
+    shell.create_shortcut(lnk, str(tmp_path / "gone" / "Other.exe"), "Other")
+    assert not shell.refresh_shortcut_if_moved(lnk, new, "Leafpen PDF")
+
+
+def test_shortcut_folders_are_the_users():
+    import os
+    for place in shell.SHORTCUT_PLACES:
+        path = shell.shortcut_path(place, "Leafpen PDF")
+        assert path.endswith(r"\Leafpen PDF.lnk") and os.path.isdir(os.path.dirname(path))

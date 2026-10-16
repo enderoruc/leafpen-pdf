@@ -28,6 +28,8 @@ No accounts, no cloud, no watermarks. Your files never leave your computer.
   Drop several PDFs on the window to merge them, or images to make a PDF
 - **Search** (Ctrl+F), **command palette** (Ctrl+K), undo/redo, recent files, and password-protected PDFs
 - **English and Türkçe** interface, following your Windows language (Help › Language to change)
+- **Windows integration** from the Help menu: show in "Open with" for PDF files, and shortcuts on the desktop
+  and in the Start menu. They follow the folder if you move it; no administrator rights needed
 
 ## Install
 
