@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QColorDialog, QComboBox, QDockWidge
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_ID, APP_NAME, ORG_NAME
-from ..core import richtext, shell, signing
+from ..core import pdftools, richtext, shell, signing
 from ..core.document import PasswordRequired, PdfDocument, PdfError, SearchHit, write_file
 from ..core.richtext import TextStyle
 from ..core.signing import SigningError
@@ -318,6 +318,13 @@ class MainWindow(QMainWindow):
         self.act_reset_crop = self._action(tr("Remove crop (selected pages)"), self.reset_crop)
         self.act_palette = self._action(tr("Command palette…"), lambda: palette.run_palette(self), "Ctrl+K",
                                         tip=tr("Find any command by typing part of its name"))
+        self.act_merge = self._action(tr("Merge PDFs…"), lambda: self.merge_pdfs())
+        self.act_split = self._action(tr("Split into separate PDFs…"), self.split_pdf)
+        self.act_images_to_pdf = self._action(tr("Create PDF from images…"), lambda: self.images_to_pdf())
+        self.act_protect = self._action(tr("Protect with password…"), self.protect_pdf)
+        self.act_unlock = self._action(tr("Remove password…"), self.unlock_pdf,
+                                       tip=tr("Save a copy without the password and permission restrictions"))
+        self.act_repair = self._action(tr("Repair a damaged PDF…"), self.repair_pdf)
         self.act_open_with = self._action(tr("Show in “Open with” for PDF files"), self._toggle_open_with)
         self.act_open_with.setCheckable(True)
 
@@ -356,7 +363,8 @@ class MainWindow(QMainWindow):
                             self.act_zoom_in, self.act_zoom_out, self.act_fit, self.act_actual,
                             self.act_digital, self.act_verify, self.act_find, self.act_export_images,
                             self.act_compress, self.act_apply_redactions, self.act_watermark,
-                            self.act_header_footer, self.act_reset_crop, *self.tool_actions.values()]
+                            self.act_header_footer, self.act_reset_crop, self.act_split, self.act_protect,
+                            self.act_unlock, *self.tool_actions.values()]
 
     def _tool_menu_button(self, text: str, tools: list[Tool]) -> QToolButton:
         """A toolbar button that shows the last tool chosen from its menu."""
@@ -406,6 +414,12 @@ class MainWindow(QMainWindow):
         m.addActions([T[Tool.REDACT], self.act_apply_redactions])
         m.addSeparator()
         m.addAction(T[Tool.FORM_FIELD])
+        m = mb.addMenu(tr("&Tools"))
+        m.addActions([self.act_merge, self.act_split, self.act_images_to_pdf])
+        m.addSeparator()
+        m.addActions([self.act_protect, self.act_unlock])
+        m.addSeparator()
+        m.addAction(self.act_repair)
         m = mb.addMenu(tr("&View"))
         m.addAction(self.act_palette)
         m.addSeparator()
@@ -557,6 +571,7 @@ class MainWindow(QMainWindow):
             b.setEnabled(has_doc)
         self.act_undo.setEnabled(has_doc and self.doc.can_undo())
         self.act_redo.setEnabled(has_doc and self.doc.can_redo())
+        self.act_unlock.setEnabled(has_doc and self.doc.is_encrypted)
         self.view.setVisible(has_doc)
         self.empty.setVisible(not has_doc)
         if not has_doc:
@@ -1421,24 +1436,55 @@ class MainWindow(QMainWindow):
     def _base_name(self) -> str:
         return Path(self.doc.path).stem if self.doc.path else tr("document")
 
-    def _save_copy_path(self, title: str, filename: str, file_filter: str) -> str | None:
-        folder = os.path.dirname(self.doc.path) if self.doc.path else self._last_dir()
+    def _save_copy_path(self, title: str, filename: str, file_filter: str,
+                        folder: str | None = None) -> str | None:
+        if folder is None:
+            folder = os.path.dirname(self.doc.path) if self.doc and self.doc.path else self._last_dir()
         path, _ = QFileDialog.getSaveFileName(self, title, str(Path(folder) / filename), file_filter)
         return path or None
+
+    def _pdf_target(self, title: str, filename: str, folder: str | None = None,
+                    original: str | None = None) -> str | None:
+        """Where to save a new PDF; never over the open document (or `original`)."""
+        path = self._save_copy_path(title, filename, _pdf_filter(), folder)
+        if not path:
+            return None
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        taken = {os.path.normcase(os.path.abspath(p)) for p in (self.doc.path if self.doc else None, original) if p}
+        if os.path.normcase(os.path.abspath(path)) in taken:
+            dialogs.warn(self, tr("Choose a different file name; the new file cannot replace the original."))
+            return None
+        return path
+
+    def _write_new_pdf(self, path: str, make) -> bytes | None:
+        """Build a PDF with `make()` and write it to `path`. Returns its bytes, or None after an error."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            data = make()
+            write_file(path, data)
+        except PdfError as e:
+            dialogs.warn(self, str(e))
+            return None
+        except (OSError, RuntimeError) as e:
+            dialogs.warn(self, tr("Could not save: {error}", error=e))
+            return None
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.settings.setValue("last_dir", os.path.dirname(path))
+        return data
+
+    def _offer_open(self, path: str, text: str):
+        if (QMessageBox.question(self, APP_NAME, text + "\n\n" + tr("Open it now?"))
+                == QMessageBox.StandardButton.Yes and self._confirm_discard()):
+            self.open_path(path)
 
     def compress(self):
         dlg = dialogs.CompressDialog(self, self.doc.has_signatures())
         if not dlg.exec():
             return
-        path = self._save_copy_path(tr("Save compressed copy"),
-                                    tr("{base}_compressed.pdf", base=self._base_name()), _pdf_filter())
+        path = self._pdf_target(tr("Save compressed copy"), tr("{base}_compressed.pdf", base=self._base_name()))
         if not path:
-            return
-        if not path.lower().endswith(".pdf"):
-            path += ".pdf"
-        if self.doc.path and os.path.abspath(path) == self.doc.path:
-            dialogs.warn(self, tr("Choose a different file name; the compressed copy cannot replace the open "
-                                  "document."))
             return
         before = len(self.doc.disk_bytes) if self.doc.disk_bytes is not None and not self.doc.dirty else None
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -1479,6 +1525,123 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
         self.statusBar().showMessage(tr("{count} image(s) saved, e.g. {path}", count=len(written),
                                         path=written[0]), 8000)
+
+    # ---- whole-file tools -----------------------------------------------------
+
+    def _read_files(self, paths: list[str], read) -> list[tuple[str, bytes]] | None:
+        try:
+            return [read(p) for p in paths]
+        except OSError as e:
+            dialogs.warn(self, tr("Could not read the file: {error}", error=e))
+        except PdfError as e:
+            dialogs.warn(self, str(e))
+        return None
+
+    def merge_pdfs(self, paths: list[str] | None = None):
+        if self.doc:
+            self.view.finish_inline(commit=True)
+        open_name = (os.path.basename(self.doc.path) if self.doc.path else tr("Untitled")) if self.doc else None
+        dlg = dialogs.MergeDialog(self, self._last_dir(), open_name)
+        dlg.files.add_paths(paths or [])
+        if not dlg.exec():
+            return
+        paths = dlg.files.paths()
+
+        def read(p: str) -> tuple[str, bytes]:
+            if p == dialogs.OPEN_DOCUMENT:
+                return self.doc.path or tr("Untitled"), self.doc.plain_bytes()
+            return p, Path(p).read_bytes()
+
+        sources = self._read_files(paths, read)
+        if sources is None:
+            return
+        first_is_open = paths[0] == dialogs.OPEN_DOCUMENT
+        base = self._base_name() if first_is_open else Path(paths[0]).stem
+        folder = None if first_is_open else os.path.dirname(paths[0])
+        path = self._pdf_target(tr("Save merged PDF"), tr("{base}_merged.pdf", base=base), folder)
+        if path and self._write_new_pdf(path, lambda: pdftools.merge_pdfs(sources, dlg.bookmarks.isChecked())):
+            self._offer_open(path, tr("Merged PDF saved:\n{path}", path=path))
+
+    def images_to_pdf(self, paths: list[str] | None = None):
+        dlg = dialogs.ImagesToPdfDialog(self, self._last_dir())
+        dlg.files.add_paths(paths or [])
+        if not dlg.exec():
+            return
+        paths = dlg.files.paths()
+        images = self._read_files(paths, dialogs.image_file)
+        if images is None:
+            return
+        path = self._pdf_target(tr("Save PDF"), f"{Path(paths[0]).stem}.pdf", os.path.dirname(paths[0]))
+        if path and self._write_new_pdf(path, lambda: pdftools.images_to_pdf(
+                images, dlg.page_size.currentData(), dlg.orientation.currentData(), dlg.margin.currentData())):
+            self._offer_open(path, tr("PDF saved:\n{path}", path=path))
+
+    def split_pdf(self):
+        self.view.finish_inline(commit=True)
+        dlg = dialogs.SplitDialog(self, self.doc.page_count)
+        if not dlg.exec():
+            return
+        groups = dlg.groups()
+        path = self._save_copy_path(tr("Split into separate PDFs"), f"{self._base_name()}.pdf", _pdf_filter())
+        if not path:
+            return
+        base = str(Path(path).with_suffix(""))
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            written = self.doc.split(groups, base)
+        except (PdfError, OSError, RuntimeError) as e:
+            dialogs.warn(self, tr("Could not save: {error}", error=e))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        QMessageBox.information(self, APP_NAME, tr("{count} PDF file(s) saved in:\n{folder}", count=len(written),
+                                                   folder=os.path.dirname(written[0])))
+
+    def protect_pdf(self):
+        self.view.finish_inline(commit=True)
+        dlg = dialogs.ProtectDialog(self, self.doc.has_signatures())
+        if not dlg.exec():
+            return
+        path = self._pdf_target(tr("Save protected copy"), tr("{base}_protected.pdf", base=self._base_name()))
+        if path and self._write_new_pdf(path, lambda: self.doc.protected_bytes(
+                dlg.open_password.text(), dlg.allowed(), dlg.owner_password.text())):
+            QMessageBox.information(self, APP_NAME, tr("Protected copy saved:\n{path}", path=path))
+
+    def unlock_pdf(self):
+        self.view.finish_inline(commit=True)
+        path = self._pdf_target(tr("Save copy without password"),
+                                tr("{base}_unlocked.pdf", base=self._base_name()))
+        if path and self._write_new_pdf(path, self.doc.plain_bytes):
+            self._offer_open(path, tr("A copy without the password and restrictions was saved:\n{path}", path=path))
+
+    def repair_pdf(self):
+        src, _ = QFileDialog.getOpenFileName(self, tr("PDF to repair"), self._last_dir(), _pdf_filter())
+        if not src:
+            return
+        try:
+            data = Path(src).read_bytes()
+        except OSError as e:
+            dialogs.warn(self, tr("Could not read the file: {error}", error=e))
+            return
+        path = self._pdf_target(tr("Save repaired PDF"), tr("{base}_repaired.pdf", base=Path(src).stem),
+                                os.path.dirname(src), original=src)
+        report = None
+
+        def make() -> bytes:
+            nonlocal report
+            out, report = pdftools.repair_pdf(data)
+            return out
+
+        if not path or not self._write_new_pdf(path, make):
+            return
+        lines = [tr("Repaired PDF saved:\n{path}", path=path), "",
+                 tr("The file's structure was damaged and has been rebuilt.") if report.rebuilt else
+                 tr("No structural damage was found; the file was rewritten cleanly."),
+                 tr("{count} page(s) recovered.", count=report.pages)]
+        if report.dropped:
+            lines.append(tr("{count} unreadable page(s) could not be recovered and were left out.",
+                            count=report.dropped))
+        self._offer_open(path, "\n".join(lines))
 
     # ---- signatures ----------------------------------------------------------
 
@@ -1645,17 +1808,28 @@ class MainWindow(QMainWindow):
             return
         super().keyPressEvent(e)
 
+    @staticmethod
+    def _dropped(e) -> tuple[list[str], list[str]]:
+        """Dropped PDFs and images."""
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        exts = [os.path.splitext(p)[1].lstrip(".").lower() for p in paths]
+        return ([p for p, x in zip(paths, exts) if x == "pdf"],
+                [p for p, x in zip(paths, exts) if x in dialogs.IMAGE_EXTENSIONS])
+
     def dragEnterEvent(self, e):
-        if any(u.toLocalFile().lower().endswith(".pdf") for u in e.mimeData().urls()):
+        if any(self._dropped(e)):
             e.acceptProposedAction()
 
     def dropEvent(self, e):
-        for u in e.mimeData().urls():
-            path = u.toLocalFile()
-            if path.lower().endswith(".pdf"):
-                if self._confirm_discard():
-                    self.open_path(path)
-                return
+        """One PDF opens; several go to Merge PDFs, and images to Create PDF from images."""
+        pdfs, images = self._dropped(e)
+        if len(pdfs) == 1:
+            if self._confirm_discard():
+                self.open_path(pdfs[0])
+        elif pdfs:
+            self.merge_pdfs(pdfs)
+        elif images:
+            self.images_to_pdf(images)
 
     def closeEvent(self, e):
         if not self._restarting and not self._confirm_discard():

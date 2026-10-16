@@ -325,8 +325,6 @@ MESSAGES = {
         "Karartmalar uygulandı. Sonucu korumak için belgeyi kaydedin.",
     "Save compressed copy": "Sıkıştırılmış kopyayı kaydet",
     "{base}_compressed.pdf": "{base}_sikistirilmis.pdf",
-    "Choose a different file name; the compressed copy cannot replace the open document.":
-        "Farklı bir dosya adı seçin; sıkıştırılmış kopya açık belgenin yerine kaydedilemez.",
     "Compressed copy saved:\n{path}\n\n{before} → {after} ({percent}% smaller)":
         "Sıkıştırılmış kopya kaydedildi:\n{path}\n\n{before} → {after} (%{percent} daha küçük)",
     "Compressed copy saved:\n{path}\n\nSize: {after}": "Sıkıştırılmış kopya kaydedildi:\n{path}\n\nBoyut: {after}",
@@ -511,4 +509,110 @@ MESSAGES = {
         "{name} artık PDF dosyaları için Birlikte aç listesinde. Varsayılan PDF programınız değişmedi.",
     "{name} was removed from Open with.": "{name}, Birlikte aç listesinden kaldırıldı.",
     "Windows did not allow the change: {error}": "Windows bu değişikliğe izin vermedi: {error}",
+
+    # --- tools: merge, split, images to PDF, passwords, repair ---
+    "&Tools": "&Araçlar",
+    "Merge PDFs…": "PDF'leri birleştir…",
+    "Merge PDFs": "PDF'leri birleştir",
+    "Merge…": "Birleştir…",
+    "Split into separate PDFs…": "Ayrı PDF'lere böl…",
+    "Split into separate PDFs": "Ayrı PDF'lere böl",
+    "Split…": "Böl…",
+    "Create PDF from images…": "Görsellerden PDF oluştur…",
+    "Create PDF from images": "Görsellerden PDF oluştur",
+    "Create PDF…": "PDF oluştur…",
+    "Protect with password…": "Parolayla koru…",
+    "Protect with password": "Parolayla koru",
+    "Remove password…": "Parolayı kaldır…",
+    "Save a copy without the password and permission restrictions":
+        "Parola ve izin kısıtlamaları olmadan bir kopya kaydet",
+    "Repair a damaged PDF…": "Bozuk bir PDF'i onar…",
+    "Choose a different file name; the new file cannot replace the original.":
+        "Farklı bir dosya adı seçin; yeni dosya orijinalin yerine kaydedilemez.",
+    "Open it now?": "Şimdi açılsın mı?",
+    "Choose at least two PDFs to merge.": "Birleştirmek için en az iki PDF seçin.",
+    "Choose at least one image.": "En az bir görsel seçin.",
+    "Could not open {name}; the file is damaged or not a PDF.": "{name} açılamadı; dosya bozuk ya da PDF değil.",
+    "{name} is password protected. Open it and remove its password first.":
+        "{name} parola korumalı. Önce dosyayı açıp parolasını kaldırın.",
+    "This PDF is password protected. Open it and remove its password first.":
+        "Bu PDF parola korumalı. Önce dosyayı açıp parolasını kaldırın.",
+    "Could not read the image {name}.": "{name} görseli okunamadı.",
+    "The file could not be recovered; too little of it is readable as a PDF.":
+        "Dosya kurtarılamadı; PDF olarak okunabilen kısmı çok az.",
+    "“{part}” is not a page range. Use for example 1-3, 5, 8-.":
+        "“{part}” geçerli bir sayfa aralığı değil. Örneğin 1-3, 5, 8- şeklinde yazın.",
+    "“{part}” is outside the document's pages (1–{count}).": "“{part}” belgenin sayfaları dışında (1–{count}).",
+    "Enter at least one page range.": "En az bir sayfa aralığı girin.",
+    "Set a password to open the file, or turn off at least one permission.":
+        "Dosyayı açmak için bir parola belirleyin ya da en az bir izni kapatın.",
+    "Add files…": "Dosya ekle…",
+    "Add files": "Dosya ekle",
+    "Remove": "Kaldır",
+    "Move up": "Yukarı taşı",
+    "Move down": "Aşağı taşı",
+    "Drag files to change their order, or drop files from Explorer here.":
+        "Sırayı değiştirmek için dosyaları sürükleyin ya da Gezgin'den buraya bırakın.",
+    "{name} (open document)": "{name} (açık belge)",
+    "Add a bookmark for each file": "Her dosya için bir yer imi ekle",
+    "Images ({patterns})": "Görseller ({patterns})",
+    "Same as the image": "Görselle aynı",
+    "Automatic (follows the image)": "Otomatik (görsele göre)",
+    "Portrait": "Dikey",
+    "Landscape": "Yatay",
+    "None": "Yok",
+    "Small": "Küçük",
+    "Large": "Büyük",
+    "Page size:": "Sayfa boyutu:",
+    "Orientation:": "Yönlendirme:",
+    "Margin:": "Kenar boşluğu:",
+    "Every page into its own file": "Her sayfa ayrı bir dosyaya",
+    "A new file every": "Her",
+    " pages": " sayfada bir yeni dosya",
+    "Page ranges:": "Sayfa aralıkları:",
+    "e.g. 1-3, 5, 8-": "örn. 1-3, 5, 8-",
+    "Each range becomes a separate file; “8-” runs to the last page. The open document is not changed.":
+        "Her aralık ayrı bir dosya olur; “8-” son sayfaya kadar gider. Açık belge değiştirilmez.",
+    "The document has {count} page(s).": "Belgede {count} sayfa var.",
+    "Printing": "Yazdırma",
+    "Copying text and images": "Metin ve görselleri kopyalama",
+    "Editing and organizing pages": "Düzenleme ve sayfaları yeniden sıralama",
+    "Comments and filling in forms": "Yorumlar ve form doldurma",
+    "Optional": "İsteğe bağlı",
+    "A protected copy is saved as a new file; the open document is not changed. Keep the password in a safe "
+    "place: it cannot be recovered.\n\nWithout a permissions password, restrictions cannot be lifted later, "
+    "not even by you.":
+        "Korumalı kopya yeni bir dosya olarak kaydedilir; açık belge değiştirilmez. Parolayı güvenli bir yerde "
+        "saklayın: kurtarılamaz.\n\nİzin parolası belirlemezseniz kısıtlamalar daha sonra kaldırılamaz; siz de "
+        "kaldıramazsınız.",
+    "The digital signatures in this document will not be valid in the protected copy.":
+        "Bu belgedeki dijital imzalar korumalı kopyada geçerli olmayacak.",
+    "Password to open:": "Açma parolası:",
+    "Repeat password:": "Parolayı tekrarla:",
+    "Allow:": "İzin ver:",
+    "Permissions password:": "İzin parolası:",
+    "The passwords do not match.": "Parolalar eşleşmiyor.",
+    "Save merged PDF": "Birleştirilmiş PDF'i kaydet",
+    "{base}_merged.pdf": "{base}_birlesik.pdf",
+    "Merged PDF saved:\n{path}": "Birleştirilmiş PDF kaydedildi:\n{path}",
+    "Save PDF": "PDF'i kaydet",
+    "PDF saved:\n{path}": "PDF kaydedildi:\n{path}",
+    "{count} PDF file(s) saved in:\n{folder}": "{count} PDF dosyası şu klasöre kaydedildi:\n{folder}",
+    "Save protected copy": "Korumalı kopyayı kaydet",
+    "{base}_protected.pdf": "{base}_korumali.pdf",
+    "Protected copy saved:\n{path}": "Korumalı kopya kaydedildi:\n{path}",
+    "Save copy without password": "Parolasız kopyayı kaydet",
+    "{base}_unlocked.pdf": "{base}_parolasiz.pdf",
+    "A copy without the password and restrictions was saved:\n{path}":
+        "Parola ve kısıtlamalar olmadan bir kopya kaydedildi:\n{path}",
+    "PDF to repair": "Onarılacak PDF",
+    "Save repaired PDF": "Onarılmış PDF'i kaydet",
+    "{base}_repaired.pdf": "{base}_onarilmis.pdf",
+    "Repaired PDF saved:\n{path}": "Onarılmış PDF kaydedildi:\n{path}",
+    "The file's structure was damaged and has been rebuilt.": "Dosyanın yapısı bozulmuştu ve yeniden oluşturuldu.",
+    "No structural damage was found; the file was rewritten cleanly.":
+        "Yapısal bir bozulma bulunamadı; dosya temiz biçimde yeniden yazıldı.",
+    "{count} page(s) recovered.": "{count} sayfa kurtarıldı.",
+    "{count} unreadable page(s) could not be recovered and were left out.":
+        "Okunamayan {count} sayfa kurtarılamadı ve dışarıda bırakıldı.",
 }

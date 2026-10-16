@@ -23,6 +23,9 @@ No accounts, no cloud, no watermarks. Your files never leave your computer.
 - **Forms**: fill in existing fields, or create text, checkbox, drop-down and list fields
 - **Sign**: handwritten signatures (draw, type or scan) and PAdES digital signatures with a `.p12` / `.pfx` certificate, plus offline signature verification
 - **Export**: pages as PNG/JPEG, or a compressed copy of the PDF
+- **Tools**: merge PDFs, split into separate PDFs (every page, every N pages or page ranges), create a PDF
+  from images, protect with a password (AES-256) and permissions, remove a password, repair a damaged PDF.
+  Drop several PDFs on the window to merge them, or images to make a PDF
 - **Search** (Ctrl+F), **command palette** (Ctrl+K), undo/redo, recent files, and password-protected PDFs
 - **English and Türkçe** interface, following your Windows language (Help › Language to change)
 

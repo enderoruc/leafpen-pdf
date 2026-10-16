@@ -9,14 +9,16 @@ from pathlib import Path
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QRect, QSize, QStandardPaths, Qt
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QIcon, QImage, QPainter, QPainterPath, QPen,
                            QPixmap)
-from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
-                               QPushButton, QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
+                               QPushButton, QRadioButton, QSpinBox, QTabWidget, QTextBrowser, QVBoxLayout,
+                               QWidget)
 
 from .. import APP_NAME, APP_VERSION
 from ..core import fonts, signing
-from ..core.document import NOTE_ICONS
+from ..core.document import NOTE_ICONS, PdfError
+from ..core.pdftools import IMAGE_TYPES, every_n_pages, parse_ranges
 from ..core.signing import SignatureInfo, SigningError
 from ..i18n import fmt_datetime, tr
 
@@ -307,6 +309,266 @@ class ExportImagesDialog(QDialog):
 
 
 # ---- handwritten signature -------------------------------------------------
+
+# ---- whole-file tools ----------------------------------------------------------
+
+class FileList(QListWidget):
+    """Files in a chosen order: drag to reorder, or drop files from Explorer."""
+
+    def __init__(self, extensions: tuple[str, ...]):
+        super().__init__()
+        self.extensions = extensions
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+
+    def add_file(self, path: str, label: str | None = None):
+        item = QListWidgetItem(label or os.path.basename(path))
+        item.setToolTip(path)
+        item.setData(Qt.ItemDataRole.UserRole, path)
+        self.addItem(item)
+
+    def add_paths(self, paths: list[str]):
+        for path in paths:
+            if os.path.splitext(path)[1].lstrip(".").lower() in self.extensions:
+                self.add_file(path)
+
+    def paths(self) -> list[str]:
+        return [self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())]
+
+    def _external(self, e) -> bool:
+        return e.source() is not self and e.mimeData().hasUrls()
+
+    def dragEnterEvent(self, e):
+        if self._external(e):
+            e.acceptProposedAction()
+        else:
+            super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e):
+        if self._external(e):
+            e.acceptProposedAction()
+        else:
+            super().dragMoveEvent(e)
+
+    def dropEvent(self, e):
+        if self._external(e):
+            self.add_paths([u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()])
+            e.acceptProposedAction()
+        else:
+            super().dropEvent(e)
+
+
+class FileListDialog(QDialog):
+    """A list of files to combine, with buttons to add, remove and reorder them."""
+
+    def __init__(self, parent, title: str, ok_text: str, file_filter: str, extensions: tuple[str, ...],
+                 start_dir: str, minimum: int):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.file_filter, self.start_dir, self.minimum = file_filter, start_dir, minimum
+        self.files = FileList(extensions)
+        side = QVBoxLayout()
+        for text, slot in ((tr("Add files…"), self._add), (tr("Remove"), self._remove),
+                           (tr("Move up"), lambda: self._move(-1)), (tr("Move down"), lambda: self._move(1))):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            side.addWidget(b)
+        side.addStretch()
+        row = QHBoxLayout()
+        row.addWidget(self.files, 1)
+        row.addLayout(side)
+        hint = QLabel(tr("Drag files to change their order, or drop files from Explorer here."))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: palette(placeholder-text);")
+        self.options = QFormLayout()
+        lay = QVBoxLayout(self)
+        lay.addLayout(row)
+        lay.addWidget(hint)
+        lay.addLayout(self.options)
+        lay.addWidget(_buttons(self, ok_text))
+        self.resize(560, 400)
+
+    def _add(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, tr("Add files"), self.start_dir, self.file_filter)
+        if paths:
+            self.start_dir = os.path.dirname(paths[0])
+            self.files.add_paths(paths)
+
+    def _remove(self):
+        for item in self.files.selectedItems():
+            self.files.takeItem(self.files.row(item))
+
+    def _move(self, step: int):
+        row = self.files.currentRow()
+        if row < 0 or not 0 <= row + step < self.files.count():
+            return
+        item = self.files.takeItem(row)
+        self.files.insertItem(row + step, item)
+        self.files.setCurrentRow(row + step)
+
+    def accept(self):
+        if self.files.count() < self.minimum:
+            warn(self, tr("Choose at least two PDFs to merge.") if self.minimum > 1 else
+                 tr("Choose at least one image."))
+            return
+        super().accept()
+
+
+OPEN_DOCUMENT = ""  # list entry standing for the document open in the window
+
+
+class MergeDialog(FileListDialog):
+    def __init__(self, parent, start_dir: str, open_name: str | None):
+        super().__init__(parent, tr("Merge PDFs"), tr("Merge…"), tr("PDF documents (*.pdf)"), ("pdf",),
+                         start_dir, 2)
+        if open_name:
+            self.files.add_file(OPEN_DOCUMENT, tr("{name} (open document)", name=open_name))
+        self.bookmarks = QCheckBox(tr("Add a bookmark for each file"))
+        self.bookmarks.setChecked(True)
+        self.options.addRow(self.bookmarks)
+
+
+IMAGE_EXTENSIONS = ("png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff", "webp")
+
+
+class ImagesToPdfDialog(FileListDialog):
+    def __init__(self, parent, start_dir: str):
+        patterns = " ".join(f"*.{e}" for e in IMAGE_EXTENSIONS)
+        super().__init__(parent, tr("Create PDF from images"), tr("Create PDF…"),
+                         tr("Images ({patterns})", patterns=patterns), IMAGE_EXTENSIONS, start_dir, 1)
+        self.page_size = QComboBox()
+        self.page_size.addItem(tr("Same as the image"), "image")
+        self.page_size.addItem("A4", "a4")
+        self.page_size.addItem("Letter", "letter")
+        self.orientation = QComboBox()
+        self.orientation.addItem(tr("Automatic (follows the image)"), "auto")
+        self.orientation.addItem(tr("Portrait"), "portrait")
+        self.orientation.addItem(tr("Landscape"), "landscape")
+        self.margin = QComboBox()
+        for text, points in ((tr("None"), 0), (tr("Small"), 20), (tr("Large"), 40)):
+            self.margin.addItem(text, points)
+        self.page_size.currentIndexChanged.connect(
+            lambda: self.orientation.setEnabled(self.page_size.currentData() != "image"))
+        self.orientation.setEnabled(False)
+        self.options.addRow(tr("Page size:"), self.page_size)
+        self.options.addRow(tr("Orientation:"), self.orientation)
+        self.options.addRow(tr("Margin:"), self.margin)
+
+
+def image_file(path: str) -> tuple[str, bytes]:
+    """(name, bytes) of an image for `images_to_pdf`; types MuPDF cannot read are converted to PNG."""
+    if os.path.splitext(path)[1].lstrip(".").lower() in IMAGE_TYPES:
+        with open(path, "rb") as f:
+            return path, f.read()
+    img = QImage(path)
+    if img.isNull():
+        raise PdfError(tr("Could not read the image {name}.", name=os.path.basename(path)))
+    return os.path.splitext(path)[0] + ".png", png_bytes(img)
+
+
+class SplitDialog(QDialog):
+    def __init__(self, parent, page_count: int):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Split into separate PDFs"))
+        self.page_count = page_count
+        self.each = QRadioButton(tr("Every page into its own file"))
+        self.every = QRadioButton(tr("A new file every"))
+        self.size = QSpinBox()
+        self.size.setRange(1, max(1, page_count))
+        self.size.setValue(min(2, page_count))
+        self.size.setSuffix(tr(" pages"))
+        self.custom = QRadioButton(tr("Page ranges:"))
+        self.ranges = QLineEdit()
+        self.ranges.setPlaceholderText(tr("e.g. 1-3, 5, 8-"))
+        self.each.setChecked(True)
+        self.size.valueChanged.connect(lambda: self.every.setChecked(True))
+        self.ranges.textEdited.connect(lambda: self.custom.setChecked(True))
+        every_row = QHBoxLayout()
+        every_row.addWidget(self.every)
+        every_row.addWidget(self.size)
+        every_row.addStretch()
+        custom_row = QHBoxLayout()
+        custom_row.addWidget(self.custom)
+        custom_row.addWidget(self.ranges, 1)
+        hint = QLabel(tr("Each range becomes a separate file; “8-” runs to the last page. The open document "
+                         "is not changed."))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: palette(placeholder-text);")
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(tr("The document has {count} page(s).", count=page_count)))
+        lay.addWidget(self.each)
+        lay.addLayout(every_row)
+        lay.addLayout(custom_row)
+        lay.addWidget(hint)
+        lay.addWidget(_buttons(self, tr("Split…")))
+        self.resize(440, 220)
+
+    def groups(self) -> list[list[int]]:
+        if self.custom.isChecked():
+            return parse_ranges(self.ranges.text(), self.page_count)
+        return every_n_pages(self.page_count, 1 if self.each.isChecked() else self.size.value())
+
+    def accept(self):
+        try:
+            self.groups()
+        except PdfError as e:
+            warn(self, str(e))
+            self.ranges.setFocus()
+            return
+        super().accept()
+
+
+class ProtectDialog(QDialog):
+    def __init__(self, parent, has_signatures: bool):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Protect with password"))
+        self.open_password = QLineEdit()
+        self.repeat = QLineEdit()
+        self.owner_password = QLineEdit()
+        for edit in (self.open_password, self.repeat, self.owner_password):
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.owner_password.setPlaceholderText(tr("Optional"))
+        self.allow = {
+            "print": QCheckBox(tr("Printing")),
+            "copy": QCheckBox(tr("Copying text and images")),
+            "modify": QCheckBox(tr("Editing and organizing pages")),
+            "annotate": QCheckBox(tr("Comments and filling in forms")),
+        }
+        allow_box = QVBoxLayout()
+        for box in self.allow.values():
+            box.setChecked(True)
+            allow_box.addWidget(box)
+        text = tr("A protected copy is saved as a new file; the open document is not changed. Keep the "
+                  "password in a safe place: it cannot be recovered.\n\nWithout a permissions password, "
+                  "restrictions cannot be lifted later, not even by you.")
+        if has_signatures:
+            text += "\n\n" + tr("The digital signatures in this document will not be valid in the protected "
+                                "copy.")
+        info = QLabel(text)
+        info.setWordWrap(True)
+        form = QFormLayout(self)
+        form.addRow(tr("Password to open:"), self.open_password)
+        form.addRow(tr("Repeat password:"), self.repeat)
+        form.addRow(tr("Allow:"), allow_box)
+        form.addRow(tr("Permissions password:"), self.owner_password)
+        form.addRow(info)
+        form.addRow(_buttons(self, tr("Save copy…")))
+        self.resize(480, 360)
+
+    def allowed(self) -> set[str]:
+        return {key for key, box in self.allow.items() if box.isChecked()}
+
+    def accept(self):
+        if self.open_password.text() != self.repeat.text():
+            warn(self, tr("The passwords do not match."))
+            self.repeat.setFocus()
+            return
+        if not self.open_password.text() and len(self.allowed()) == len(self.allow):
+            warn(self, tr("Set a password to open the file, or turn off at least one permission."))
+            self.open_password.setFocus()
+            return
+        super().accept()
+
 
 def crop_to_content(img: QImage, pad: int = 6) -> QImage:
     """Trim fully transparent borders."""

@@ -11,6 +11,7 @@ import datetime
 import math
 import os
 import re
+import secrets
 import tempfile
 import time
 from contextlib import contextmanager
@@ -225,6 +226,14 @@ _ALIGN = {"left": pymupdf.TEXT_ALIGN_LEFT, "center": pymupdf.TEXT_ALIGN_CENTER, 
 # Image settings for "reduce file size": (images above this dpi..., are resampled to this dpi, JPEG quality)
 COMPRESSION_LEVELS = {"high": (300, 200, 85), "medium": (225, 150, 75), "low": (150, 96, 60)}
 
+# What a password-protected copy may allow without the permissions password.
+PERMISSIONS = {
+    "print": pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ,
+    "copy": pymupdf.PDF_PERM_COPY,
+    "modify": pymupdf.PDF_PERM_MODIFY | pymupdf.PDF_PERM_ASSEMBLE,
+    "annotate": pymupdf.PDF_PERM_ANNOTATE | pymupdf.PDF_PERM_FORM,
+}
+
 
 def _dominant_style(spans: list[dict]) -> tuple[float, tuple[float, float, float], str, bool, bool]:
     main = max(spans, key=lambda s: len(s["text"].strip()))
@@ -364,7 +373,10 @@ class PdfDocument:
 
     @property
     def is_encrypted(self) -> bool:
-        return self._doc.is_encrypted or self._password is not None
+        """Has an open password or permission restrictions (a PDF with only an owner password opens
+        without a password, so MuPDF's own flag misses it)."""
+        return bool(self._doc.is_encrypted or self._password is not None
+                    or (self._doc.metadata or {}).get("encryption"))
 
     def can_undo(self) -> bool:
         return bool(self._undo)
@@ -505,12 +517,29 @@ class PdfDocument:
                 self._doc.insert_pdf(other, start_at=at)
             return other.page_count
 
-    def extract_pages(self, pnos: list[int], path: str) -> None:
+    def _pages_bytes(self, pnos: list[int]) -> bytes:
         out = pymupdf.open()
         for pno in sorted(set(pnos)):
             out.insert_pdf(self._doc, from_page=pno, to_page=pno)
-        out.save(path, garbage=3, deflate=True)
+        data = out.tobytes(garbage=3, deflate=True)
         out.close()
+        return data
+
+    def extract_pages(self, pnos: list[int], path: str) -> None:
+        write_file(path, self._pages_bytes(pnos))
+
+    def split(self, groups: list[list[int]], base: str) -> list[str]:
+        """Save each page group as `<base>_<first>-<last>.pdf` (`<base>_<n>.pdf` for one page).
+        Returns the written paths."""
+        digits = len(str(self.page_count))
+        paths = []
+        for group in groups:
+            first, last = min(group) + 1, max(group) + 1
+            label = f"{first:0{digits}d}" if first == last else f"{first:0{digits}d}-{last:0{digits}d}"
+            path = f"{base}_{label}.pdf"
+            write_file(path, self._pages_bytes(group))
+            paths.append(path)
+        return paths
 
     # ---- text --------------------------------------------------------------
 
@@ -1407,6 +1436,27 @@ class PdfDocument:
         finally:
             doc.close()
         return out
+
+    def plain_bytes(self) -> bytes:
+        """The current document without its password and permission restrictions."""
+        return self._doc.tobytes(garbage=3, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
+
+    def protected_bytes(self, open_password: str, allow: set[str], owner_password: str = "") -> bytes:
+        """An AES-256 encrypted copy. `allow` holds keys of PERMISSIONS; anything else is restricted.
+
+        Without an `owner_password`, restrictions are locked with a random one (no one can lift them);
+        with no restrictions the open password also grants full access.
+        """
+        restricted = set(PERMISSIONS) - set(allow)
+        if not open_password and not restricted:
+            raise PdfError(tr("Set a password to open the file, or turn off at least one permission."))
+        perms = pymupdf.PDF_PERM_ACCESSIBILITY  # screen readers always keep access
+        for key in allow:
+            perms |= PERMISSIONS[key]
+        if not owner_password:
+            owner_password = secrets.token_urlsafe(24) if restricted else open_password
+        return self._doc.tobytes(garbage=3, deflate=True, encryption=pymupdf.PDF_ENCRYPT_AES_256,
+                                 user_pw=open_password, owner_pw=owner_password, permissions=perms)
 
     # ---- forms -------------------------------------------------------------
 
